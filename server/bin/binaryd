@@ -1,0 +1,4 @@
+#!/bin/sh
+# Launcher for the Binary server (requires Node.js 20+).
+DIR=$(cd "$(dirname "$0")/.." && pwd -P)
+exec node "$DIR/dist/src/main.js" "$@"

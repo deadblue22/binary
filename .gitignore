@@ -1,0 +1,5 @@
+/dist/
+/client/.build/
+/client/.swiftpm/
+.DS_Store
+*.test

@@ -1,0 +1,20 @@
+DIST := $(CURDIR)/dist
+
+.PHONY: all server app test clean
+
+all: server app
+
+# binaryd (TypeScript, official Claude Agent SDK); run with server/bin/binaryd
+server:
+	cd server && npm install --no-audit --no-fund && npm run build
+
+# dist/Binary.app
+app:
+	OUT=$(DIST) client/scripts/build-app.sh
+
+test:
+	cd server && npm test
+	cd client && swift build
+
+clean:
+	rm -rf $(DIST) client/.build server/dist
