@@ -1,6 +1,10 @@
-import AppKit
 import Foundation
 import Observation
+#if os(macOS)
+import AppKit
+#else
+import UIKit
+#endif
 
 enum ConnectionStatus: Equatable {
     case connecting
@@ -247,7 +251,7 @@ final class ServerConnection: Identifiable {
 
     /// Images in user messages, cached in memory and on disk (keys never
     /// change); nil when the server no longer has it.
-    @ObservationIgnored private let imageCache = NSCache<NSString, NSImage>()
+    @ObservationIgnored private let imageCache = NSCache<NSString, PlatformImage>()
     @ObservationIgnored private var missingImages: Set<String> = []
 
     /// A file a message points at, from the server (relative to the session's folder).
@@ -255,17 +259,17 @@ final class ServerConnection: Identifiable {
         try await requireAPI().file("/sessions/\(session)/file", query: ["path": path])
     }
 
-    func image(session: String, key: String) async -> NSImage? {
+    func image(session: String, key: String) async -> PlatformImage? {
         let k = "\(session)/\(key)" as NSString
         if let img = imageCache.object(forKey: k) { return img }
         if missingImages.contains(k as String) { return nil }
-        if let data = LocalCache.shared.image(server: id, session: session, key: key), let img = NSImage(data: data) {
+        if let data = LocalCache.shared.image(server: id, session: session, key: key), let img = PlatformImage(data: data) {
             imageCache.setObject(img, forKey: k, cost: data.count)
             return img
         }
         do {
             let data = try await requireAPI().data("/sessions/\(session)/images/\(key)")
-            guard let img = NSImage(data: data) else { return nil }
+            guard let img = PlatformImage(data: data) else { return nil }
             imageCache.setObject(img, forKey: k, cost: data.count)
             LocalCache.shared.storeImage(server: id, session: session, key: key, data)
             return img

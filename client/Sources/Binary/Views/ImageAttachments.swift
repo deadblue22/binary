@@ -1,14 +1,19 @@
-import AppKit
 import ImageIO
 import SwiftUI
 import UniformTypeIdentifiers
+#if os(macOS)
+import AppKit
+#else
+import PhotosUI
+import UIKit
+#endif
 
 /// An image waiting to be sent with a message.
 struct PendingImage: Identifiable, Equatable {
     let id = UUID()
     let data: Data
     let mediaType: String
-    let thumbnail: NSImage
+    let thumbnail: PlatformImage
 
     var wire: WireImage { WireImage(mediaType: mediaType, data: data.base64EncodedString()) }
 
@@ -37,11 +42,10 @@ enum ImageProcessor {
             kCGImageSourceThumbnailMaxPixelSize: maxSide,
         ]
         guard let cg = CGImageSourceCreateThumbnailAtIndex(src, 0, opts as CFDictionary) else { return nil }
-        let rep = NSBitmapImageRep(cgImage: cg)
-        var out = rep.representation(using: .png, properties: [:])
+        var out = encode(cg, as: .png)
         var mediaType = "image/png"
         if let png = out, png.count > jpegAbove {
-            out = rep.representation(using: .jpeg, properties: [.compressionFactor: 0.85])
+            out = encode(cg, as: .jpeg, quality: 0.85)
             mediaType = "image/jpeg"
         }
         guard let encoded = out, encoded.count <= maxBytes, let thumb = thumbnail(src) else { return nil }
@@ -54,16 +58,44 @@ enum ImageProcessor {
         return prepare(data, type: type)
     }
 
-    private static func thumbnail(_ src: CGImageSource) -> NSImage? {
+    /// PNG or JPEG bytes of a bitmap.
+    private static func encode(_ image: CGImage, as type: UTType, quality: Double? = nil) -> Data? {
+        let data = NSMutableData()
+        guard let dest = CGImageDestinationCreateWithData(data, type.identifier as CFString, 1, nil) else { return nil }
+        let props = quality.map { [kCGImageDestinationLossyCompressionQuality: $0] as CFDictionary }
+        CGImageDestinationAddImage(dest, image, props)
+        guard CGImageDestinationFinalize(dest) else { return nil }
+        return data as Data
+    }
+
+    private static func thumbnail(_ src: CGImageSource) -> PlatformImage? {
         let opts: [CFString: Any] = [
             kCGImageSourceCreateThumbnailFromImageAlways: true,
             kCGImageSourceCreateThumbnailWithTransform: true,
             kCGImageSourceThumbnailMaxPixelSize: 240,
         ]
         guard let cg = CGImageSourceCreateThumbnailAtIndex(src, 0, opts as CFDictionary) else { return nil }
-        return NSImage(cgImage: cg, size: NSSize(width: cg.width, height: cg.height))
+        return PlatformImage(bitmap: cg)
     }
 
+    /// Loads dropped items (files or image data).
+    static func load(_ providers: [NSItemProvider], into add: @escaping @MainActor ([PendingImage]) -> Void) {
+        for p in providers {
+            if p.hasItemConformingToTypeIdentifier(UTType.fileURL.identifier) {
+                _ = p.loadObject(ofClass: URL.self) { url, _ in
+                    guard let url, let img = prepare(url: url) else { return }
+                    Task { @MainActor in add([img]) }
+                }
+            } else if p.hasItemConformingToTypeIdentifier(UTType.image.identifier) {
+                p.loadDataRepresentation(forTypeIdentifier: UTType.image.identifier) { data, _ in
+                    guard let data, let img = prepare(data) else { return }
+                    Task { @MainActor in add([img]) }
+                }
+            }
+        }
+    }
+
+    #if os(macOS)
     /// Image files or image data on the pasteboard. Text wins over image
     /// data, so pasting rich text still pastes text.
     static func images(from pb: NSPasteboard) -> [PendingImage] {
@@ -85,23 +117,6 @@ enum ImageProcessor {
         return []
     }
 
-    /// Loads dropped items (files or image data).
-    static func load(_ providers: [NSItemProvider], into add: @escaping @MainActor ([PendingImage]) -> Void) {
-        for p in providers {
-            if p.hasItemConformingToTypeIdentifier(UTType.fileURL.identifier) {
-                _ = p.loadObject(ofClass: URL.self) { url, _ in
-                    guard let url, let img = prepare(url: url) else { return }
-                    Task { @MainActor in add([img]) }
-                }
-            } else if p.hasItemConformingToTypeIdentifier(UTType.image.identifier) {
-                p.loadDataRepresentation(forTypeIdentifier: UTType.image.identifier) { data, _ in
-                    guard let data, let img = prepare(data) else { return }
-                    Task { @MainActor in add([img]) }
-                }
-            }
-        }
-    }
-
     /// Opens a file panel for picking images.
     @MainActor
     static func pick() -> [PendingImage] {
@@ -113,6 +128,80 @@ enum ImageProcessor {
         guard panel.runModal() == .OK else { return [] }
         return panel.urls.compactMap(prepare(url:))
     }
+    #else
+    /// Images on the clipboard, one per item, as copied (GIF and WebP stay animated).
+    static func pasteboardImages() -> [PendingImage] {
+        let pb = UIPasteboard.general
+        let types = [UTType.png, .jpeg, .gif, UTType("org.webmproject.webp"), .heic, .tiff].compactMap { $0 }
+        var out: [PendingImage] = []
+        for i in 0..<pb.numberOfItems {
+            for t in types {
+                if let d = pb.data(forPasteboardType: t.identifier, inItemSet: IndexSet(integer: i))?.first,
+                   let img = prepare(d, type: t) {
+                    out.append(img)
+                    break
+                }
+            }
+        }
+        if out.isEmpty {
+            out = (pb.images ?? []).compactMap { $0.pngData().flatMap { prepare($0, type: .png) } }
+        }
+        return out
+    }
+    #endif
+}
+
+/// The + at the left of the message box.
+struct AttachButton: View {
+    let add: ([PendingImage]) -> Void
+    #if os(macOS)
+    var body: some View {
+        Button {
+            add(ImageProcessor.pick())
+        } label: {
+            Image(systemName: "plus")
+                .font(.system(size: 13, weight: .semibold))
+                .frame(width: 26, height: 28)
+        }
+        .buttonStyle(.icon(size: 26))
+        .help(tr("Attach images (or paste / drop them)"))
+        .accessibilityLabel(tr("Attach Images"))
+    }
+    #else
+    @State private var picking = false
+    @State private var items: [PhotosPickerItem] = []
+
+    var body: some View {
+        Menu {
+            Button { picking = true } label: { Label(tr("Photo Library"), systemImage: "photo.on.rectangle") }
+            Button { add(ImageProcessor.pasteboardImages()) } label: { Label(tr("Paste Image"), systemImage: "doc.on.clipboard") }
+        } label: {
+            Image(systemName: "plus")
+                .font(.system(size: 15, weight: .semibold))
+                .frame(width: 30, height: 32)
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.icon(size: 30))
+        .accessibilityLabel(tr("Attach Images"))
+        .photosPicker(isPresented: $picking, selection: $items, maxSelectionCount: ImageProcessor.maxPerMessage,
+                      matching: .images, preferredItemEncoding: .current)
+        .onChange(of: items) { _, picked in
+            guard !picked.isEmpty else { return }
+            items = []
+            Task {
+                var out: [PendingImage] = []
+                for item in picked {
+                    // Prepared off the main actor: photos can be large.
+                    if let data = try? await item.loadTransferable(type: Data.self),
+                       let img = await Task.detached(operation: { ImageProcessor.prepare(data) }).value {
+                        out.append(img)
+                    }
+                }
+                add(out)
+            }
+        }
+    }
+    #endif
 }
 
 // MARK: - Views
@@ -126,7 +215,7 @@ struct AttachmentStrip: View {
         ScrollView(.horizontal) {
             HStack(spacing: 8) {
                 ForEach(images) { img in
-                    Image(nsImage: img.thumbnail)
+                    Image(platformImage: img.thumbnail)
                         .resizable()
                         .aspectRatio(contentMode: .fill)
                         .frame(width: 64, height: 64)
@@ -156,6 +245,7 @@ struct AttachmentStrip: View {
     }
 }
 
+#if os(macOS)
 /// Catches ⌘V while `active` and takes images off the pasteboard; any other
 /// paste goes to the text field as usual.
 final class PasteCatcher {
@@ -183,6 +273,16 @@ final class PasteCatcher {
 
     deinit { remove() }
 }
+#else
+/// iOS: images are pasted through the + menu (Paste Image); a text field
+/// only takes text.
+final class PasteCatcher {
+    var active = false
+    var onImages: (([PendingImage]) -> Void)?
+    func install() {}
+    func remove() {}
+}
+#endif
 
 extension View {
     /// Accepts dropped image files and image data.
@@ -198,7 +298,7 @@ extension View {
 
 /// Loads an image a user message refers to.
 struct ImageSource {
-    var load: (String) async -> NSImage?
+    var load: (String) async -> PlatformImage?
     var data: (String) async -> Data?
 }
 
@@ -219,14 +319,14 @@ struct RemoteImageThumb: View {
     var height: CGFloat = 240
     @Environment(\.imageSource) private var source
     @Environment(\.theme) private var theme
-    @State private var image: NSImage?
+    @State private var image: PlatformImage?
     @State private var failed = false
     @State private var viewing = false
 
     var body: some View {
         Group {
             if let image {
-                Image(nsImage: image)
+                Image(platformImage: image)
                     .resizable()
                     .aspectRatio(contentMode: .fit)
                     .frame(maxWidth: height * 1.6, maxHeight: height)
@@ -256,6 +356,7 @@ struct RemoteImageThumb: View {
     }
 }
 
+#if os(macOS)
 struct ImageViewer: View {
     let image: NSImage
     let key: String?
@@ -304,3 +405,63 @@ struct ImageViewer: View {
         }
     }
 }
+#else
+/// A message image full screen: pinch or double-tap to zoom, copy, share.
+struct ImageViewer: View {
+    let image: UIImage
+    let key: String?
+    @Environment(\.dismiss) private var dismiss
+    @Environment(\.theme) private var theme
+    @State private var zoom: CGFloat = 1
+    @State private var pinch: CGFloat = 1
+    @State private var offset: CGSize = .zero
+    @State private var drag: CGSize = .zero
+
+    var body: some View {
+        NavigationStack {
+            GeometryReader { g in
+                Image(uiImage: image)
+                    .resizable()
+                    .aspectRatio(contentMode: .fit)
+                    .frame(width: g.size.width, height: g.size.height)
+                    .scaleEffect(zoom * pinch)
+                    .offset(x: offset.width + drag.width, y: offset.height + drag.height)
+                    .gesture(MagnifyGesture()
+                        .onChanged { pinch = $0.magnification }
+                        .onEnded { v in
+                            zoom = min(max(zoom * v.magnification, 1), 6)
+                            pinch = 1
+                            if zoom == 1 { offset = .zero }
+                        })
+                    .simultaneousGesture(DragGesture()
+                        .onChanged { v in if zoom > 1 { drag = v.translation } }
+                        .onEnded { v in
+                            if zoom > 1 { offset.width += v.translation.width; offset.height += v.translation.height }
+                            drag = .zero
+                        })
+                    .onTapGesture(count: 2) {
+                        withAnimation(.easeOut(duration: 0.2)) {
+                            zoom = zoom > 1 ? 1 : 2.5
+                            offset = .zero
+                        }
+                    }
+            }
+            .background(Color.black.ignoresSafeArea())
+            .navigationTitle("\(Int(image.size.width * image.scale)) × \(Int(image.size.height * image.scale))")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbarBackground(.visible, for: .navigationBar)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button(tr("Done")) { dismiss() }
+                }
+                ToolbarItemGroup(placement: .primaryAction) {
+                    Button { UIPasteboard.general.image = image } label: {
+                        Label(tr("Copy"), systemImage: "doc.on.doc")
+                    }
+                    ShareLink(item: Image(uiImage: image), preview: SharePreview(tr("Image"), image: Image(uiImage: image)))
+                }
+            }
+        }
+    }
+}
+#endif

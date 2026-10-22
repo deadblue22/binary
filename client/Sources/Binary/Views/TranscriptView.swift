@@ -6,6 +6,10 @@ struct TranscriptView<Source: TranscriptSource>: View {
     @State private var atBottom = true
     /// Last seen position of the transcript's end within its content.
     @State private var contentEnd: CGFloat = 0
+    /// Height of the visible area when the end was last seen.
+    @State private var viewport: CGFloat = 0
+    /// The reader is dragging or flicking the transcript (where the system says so).
+    @State private var userScrolling = false
     /// Rows rendered, counted from the end. Opening a session at the bottom
     /// makes the list lay out every row above, so start with the latest few.
     @State private var window = TranscriptWindow.initial
@@ -91,7 +95,7 @@ struct TranscriptView<Source: TranscriptSource>: View {
                             })
                     }
                     .coordinateSpace(name: "transcriptContent")
-                    .padding(.horizontal, 28)
+                    .padding(.horizontal, theme.gutter)
                     .padding(.vertical, 22)
                     .frame(maxWidth: theme.readingWidth, alignment: .leading)
                     .frame(maxWidth: .infinity)
@@ -100,17 +104,33 @@ struct TranscriptView<Source: TranscriptSource>: View {
                     .slimScrollers()
                 }
                 .coordinateSpace(name: "transcriptViewport")
+                .scrollDismissesKeyboard(.interactively)
+                .modifier(ScrollPhaseWatcher(userScrolling: $userScrolling))
                 // Start at the bottom; following new content is up to atBottom below.
                 .modifier(InitialAnchor(top: DebugHooks.scrollTop))
                 .background(theme.c.background)
                 // Follow new content only while the end is in view. Content that
-                // grew moves the end down without the reader scrolling away, so
-                // only a change with the same content height counts as scrolling.
+                // grew moves the end down without the reader scrolling away, and
+                // so does a smaller view (the keyboard, an approval card below),
+                // so only a change with the same sizes counts as scrolling.
                 .onPreferenceChange(BottomMarker.self) { v in
                     let grew = v.inContent != contentEnd
+                    let resized = geo.size.height != viewport
                     contentEnd = v.inContent
+                    viewport = geo.size.height
                     let visible = v.inView <= geo.size.height + 40
-                    if visible { atBottom = true } else if !grew { atBottom = false }
+                    if visible {
+                        atBottom = true
+                    } else if userScrolling {
+                        atBottom = false
+                    } else if resized || (!grew && ScrollPhaseWatcher.available) {
+                        // The view changed size (the keyboard, an approval card) or
+                        // moved without the reader (a push settling, a card sliding
+                        // in): still following, so keep the end in view.
+                        if atBottom { DispatchQueue.main.async { scrollToBottom(proxy) } }
+                    } else if !grew {
+                        atBottom = false
+                    }
                 }
                 .overlay(alignment: .bottomTrailing) {
                     if !atBottom {
@@ -514,12 +534,39 @@ private struct BottomMarker: PreferenceKey {
     static func reduce(value: inout Value, nextValue: () -> Value) { value = nextValue() }
 }
 
+/// Tells whether a scroll is the reader's (dragging, flicking) on iOS 18 and
+/// later. The Mac goes by content and view size changes alone.
+private struct ScrollPhaseWatcher: ViewModifier {
+    @Binding var userScrolling: Bool
+
+    static var available: Bool {
+        #if os(iOS)
+        if #available(iOS 18, *) { return true }
+        #endif
+        return false
+    }
+
+    func body(content: Content) -> some View {
+        #if os(iOS)
+        if #available(iOS 18, *) {
+            content.onScrollPhaseChange { _, phase in
+                userScrolling = phase == .tracking || phase == .interacting || phase == .decelerating
+            }
+        } else {
+            content
+        }
+        #else
+        content
+        #endif
+    }
+}
+
 /// Opens at the bottom (or top) without pinning there as content grows,
 /// which would pull a reader who scrolled up back down.
 private struct InitialAnchor: ViewModifier {
     let top: Bool
     func body(content: Content) -> some View {
-        if #available(macOS 15, *) {
+        if #available(macOS 15, iOS 18, *) {
             content.defaultScrollAnchor(top ? .top : .bottom, for: .initialOffset)
         } else {
             content.defaultScrollAnchor(top ? .top : .bottom)

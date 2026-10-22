@@ -1,10 +1,14 @@
-import AppKit
 import SwiftUI
+#if os(macOS)
+import AppKit
+#else
+import UIKit
+#endif
 
 // Paragraphs, headings and lists of one message are drawn as a single
-// read-only NSTextView, so a mouse selection can run across them (separate
-// SwiftUI Text views each keep their own selection). Code blocks, quotes and
-// tables stay separate views.
+// read-only text view (NSTextView / UITextView), so a selection can run
+// across them (separate SwiftUI Text views each keep their own selection).
+// Code blocks, quotes and tables stay separate views.
 
 /// One piece of a rendered message: a run of flowing text, or a block view.
 enum MDSegment {
@@ -13,17 +17,23 @@ enum MDSegment {
 }
 
 extension Theme {
-    func nsText(_ size: CGFloat, weight: NSFont.Weight = .regular) -> NSFont {
+    func nsText(_ size: CGFloat, weight: PlatformFont.Weight = .regular) -> PlatformFont {
         if isPrimary, Fonts.inter {
+            #if os(macOS)
             let d = NSFontDescriptor(fontAttributes: [.family: "Inter"])
                 .addingAttributes([.traits: [NSFontDescriptor.TraitKey.weight: weight]])
             if let f = NSFont(descriptor: d, size: size) { return f }
+            #else
+            let d = UIFontDescriptor(fontAttributes: [.family: "Inter"])
+                .addingAttributes([.traits: [UIFontDescriptor.TraitKey.weight: weight]])
+            return UIFont(descriptor: d, size: size)
+            #endif
         }
         return .systemFont(ofSize: size, weight: weight)
     }
 
-    func nsMono(_ size: CGFloat) -> NSFont {
-        if isPrimary, let name = Fonts.cascadia, let f = NSFont(name: name, size: size) { return f }
+    func nsMono(_ size: CGFloat) -> PlatformFont {
+        if isPrimary, let name = Fonts.cascadia, let f = PlatformFont(name: name, size: size) { return f }
         return .monospacedSystemFont(ofSize: size, weight: .regular)
     }
 }
@@ -54,7 +64,7 @@ enum MarkdownAttributed {
     static func build(_ blocks: [MDBlock], theme: Theme, role: TextRole) -> NSAttributedString {
         let size = theme.size(role)
         let out = NSMutableAttributedString()
-        let text = NSColor(theme.c.text)
+        let text = PlatformColor(theme.c.text)
         let gap = size * 0.75
         for (bi, block) in blocks.enumerated() {
             let last = bi == blocks.count - 1
@@ -67,7 +77,7 @@ enum MarkdownAttributed {
                 let r: TextRole = level == 1 ? .h1 : level == 2 ? .h2 : level == 3 ? .h3 : .h4
                 let hs = theme.size(r)
                 let p = paragraphStyle(theme, before: bi == 0 ? 0 : (level <= 2 ? size * 0.6 : size * 0.3), after: last ? 0 : size * 0.45)
-                out.append(inline(s, theme: theme, size: hs, color: NSColor(theme.c.heading), paragraph: p,
+                out.append(inline(s, theme: theme, size: hs, color: PlatformColor(theme.c.heading), paragraph: p,
                                   weight: theme.isPrimary ? .semibold : .bold))
                 if !last { out.append(newline(p)) }
             case .list(let items):
@@ -78,19 +88,19 @@ enum MarkdownAttributed {
                     let p = paragraphStyle(theme, after: lastItem ? (last ? 0 : gap) : size * 0.4)
                     p.firstLineHeadIndent = indent
                     p.headIndent = indent + markerWidth
-                    p.tabStops = [NSTextTab(textAlignment: .left, location: indent + markerWidth)]
+                    p.tabStops = [NSTextTab(textAlignment: .left, location: indent + markerWidth, options: [:])]
                     let marker: String
                     if let checked = item.checked { marker = checked ? "☑" : "☐" } else { marker = item.marker }
                     out.append(NSAttributedString(string: marker + "\t", attributes: [
                         .font: theme.nsText(size, weight: .semibold),
-                        .foregroundColor: NSColor(item.checked == true ? theme.c.success : theme.c.listMarker),
+                        .foregroundColor: PlatformColor(item.checked == true ? theme.c.success : theme.c.listMarker),
                         .paragraphStyle: p,
                     ]))
                     let body = inline(item.text, theme: theme, size: size, color: text, paragraph: p)
                     if item.checked == true {
                         let m = NSMutableAttributedString(attributedString: body)
                         m.addAttribute(.strikethroughStyle, value: NSUnderlineStyle.single.rawValue, range: NSRange(location: 0, length: m.length))
-                        m.addAttribute(.foregroundColor, value: NSColor(theme.c.textMuted), range: NSRange(location: 0, length: m.length))
+                        m.addAttribute(.foregroundColor, value: PlatformColor(theme.c.textMuted), range: NSRange(location: 0, length: m.length))
                         out.append(m)
                     } else {
                         out.append(body)
@@ -116,13 +126,12 @@ enum MarkdownAttributed {
         NSAttributedString(string: "\n", attributes: [.paragraphStyle: p])
     }
 
-    /// Inline Markdown (bold, italic, code, links, strikethrough) as AppKit attributes.
-    static func inline(_ s: String, theme: Theme, size: CGFloat, color: NSColor, paragraph: NSParagraphStyle,
-                       weight: NSFont.Weight = .regular) -> NSAttributedString {
+    /// Inline Markdown (bold, italic, code, links, strikethrough) as text attributes.
+    static func inline(_ s: String, theme: Theme, size: CGFloat, color: PlatformColor, paragraph: NSParagraphStyle,
+                       weight: PlatformFont.Weight = .regular) -> NSAttributedString {
         let parsed = MarkdownParser.inline(s)
         let out = NSMutableAttributedString()
         let base = theme.nsText(size, weight: weight)
-        let fm = NSFontManager.shared
         for run in parsed.runs {
             let piece = String(parsed[run.range].characters)
             var font = base
@@ -130,11 +139,10 @@ enum MarkdownAttributed {
             if let intent = run.inlinePresentationIntent {
                 if intent.contains(.code) {
                     font = theme.nsMono(size - 1)
-                    attrs[.foregroundColor] = NSColor(theme.c.inlineCode)
-                    attrs[.backgroundColor] = NSColor(theme.c.inlineCodeBackground)
+                    attrs[.foregroundColor] = PlatformColor(theme.c.inlineCode)
+                    attrs[.backgroundColor] = PlatformColor(theme.c.inlineCodeBackground)
                 } else {
-                    if intent.contains(.stronglyEmphasized) { font = fm.convert(font, toHaveTrait: .boldFontMask) }
-                    if intent.contains(.emphasized) { font = fm.convert(font, toHaveTrait: .italicFontMask) }
+                    font = styled(font, bold: intent.contains(.stronglyEmphasized), italic: intent.contains(.emphasized))
                 }
                 if intent.contains(.strikethrough) { attrs[.strikethroughStyle] = NSUnderlineStyle.single.rawValue }
             }
@@ -146,7 +154,27 @@ enum MarkdownAttributed {
         }
         return out
     }
+
+    /// The font with bold and / or italic added.
+    private static func styled(_ font: PlatformFont, bold: Bool, italic: Bool) -> PlatformFont {
+        #if os(macOS)
+        let fm = NSFontManager.shared
+        var f = font
+        if bold { f = fm.convert(f, toHaveTrait: .boldFontMask) }
+        if italic { f = fm.convert(f, toHaveTrait: .italicFontMask) }
+        return f
+        #else
+        guard bold || italic else { return font }
+        var traits = font.fontDescriptor.symbolicTraits
+        if bold { traits.insert(.traitBold) }
+        if italic { traits.insert(.traitItalic) }
+        guard let d = font.fontDescriptor.withSymbolicTraits(traits) else { return font }
+        return UIFont(descriptor: d, size: font.pointSize)
+        #endif
+    }
 }
+
+#if os(macOS)
 
 /// Selectable, non-editable rich text sized to its content.
 struct FlowText: NSViewRepresentable {
@@ -214,3 +242,54 @@ final class FlowTextView: NSTextView {
     // Let the transcript scroll when the wheel is over the text.
     override func scrollWheel(with event: NSEvent) { nextResponder?.scrollWheel(with: event) }
 }
+#else
+/// Selectable, non-editable rich text sized to its content.
+struct FlowText: UIViewRepresentable {
+    let text: NSAttributedString
+    let linkColor: UIColor
+    @Environment(\.fileLinkHandler) private var links
+
+    func makeCoordinator() -> LinkRouter { LinkRouter() }
+
+    /// Links to files open in Binary's preview; web links go to the browser.
+    final class LinkRouter: NSObject, UITextViewDelegate {
+        var handler: FileLinkHandler?
+        func textView(_ textView: UITextView, primaryActionFor textItem: UITextItem, defaultAction: UIAction) -> UIAction? {
+            guard case .link(let url) = textItem.content, let handler else { return defaultAction }
+            return UIAction { _ in handler.open(url) }
+        }
+    }
+
+    func makeUIView(context: Context) -> UITextView {
+        let tv = UITextView()
+        tv.isEditable = false
+        tv.isSelectable = true
+        tv.isScrollEnabled = false
+        tv.backgroundColor = .clear
+        tv.textContainerInset = .zero
+        tv.textContainer.lineFragmentPadding = 0
+        tv.setContentHuggingPriority(.defaultLow, for: .horizontal)
+        tv.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+        tv.linkTextAttributes = [.foregroundColor: linkColor]
+        tv.attributedText = text
+        context.coordinator.handler = links
+        tv.delegate = context.coordinator
+        return tv
+    }
+
+    func updateUIView(_ tv: UITextView, context: Context) {
+        context.coordinator.handler = links
+        if tv.attributedText?.isEqual(to: text) != true {
+            tv.attributedText = text
+        }
+        tv.linkTextAttributes = [.foregroundColor: linkColor]
+    }
+
+    func sizeThatFits(_ proposal: ProposedViewSize, uiView tv: UITextView, context: Context) -> CGSize? {
+        var width = proposal.width ?? 10_000
+        if !width.isFinite { width = 10_000 }
+        let used = tv.sizeThatFits(CGSize(width: width, height: .greatestFiniteMagnitude))
+        return CGSize(width: proposal.width == nil ? ceil(used.width) : width, height: ceil(used.height))
+    }
+}
+#endif

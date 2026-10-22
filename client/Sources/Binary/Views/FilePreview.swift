@@ -1,6 +1,8 @@
-import AppKit
 import SwiftUI
 import WebKit
+#if os(macOS)
+import AppKit
+#endif
 
 /// A file a message links to, opened in Binary instead of handed to the system
 /// (relative paths mean nothing to Finder, and the file may be on another machine).
@@ -48,7 +50,7 @@ enum FileLinks {
     static func handler(server: UUID, session: String, nav: Navigation) -> FileLinkHandler {
         FileLinkHandler { url in
             if isExternal(url) {
-                NSWorkspace.shared.open(url)
+                openExternal(url)
             } else {
                 nav.filePreview = FilePreviewRequest(server: server, session: session, path: path(of: url))
             }
@@ -85,8 +87,15 @@ final class FileSchemeHandler: NSObject, WKURLSchemeHandler {
         let id = ObjectIdentifier(task)
         Task { @MainActor in
             do {
-                let (data, mime) = try await conn.file(session: session, path: path)
+                var (data, mime) = try await conn.file(session: session, path: path)
                 guard !stopped.contains(id) else { return }
+                #if os(iOS)
+                // WebKit shows a text file at desktop width, shrunk to fit the
+                // phone: give it a page sized for the screen instead.
+                if mime.hasPrefix("text/") && mime != "text/html" && url == task.request.mainDocumentURL {
+                    (data, mime) = (Self.textPage(data), "text/html")
+                }
+                #endif
                 task.didReceive(URLResponse(url: url, mimeType: mime, expectedContentLength: data.count, textEncodingName: nil))
                 task.didReceive(data)
                 task.didFinish()
@@ -97,12 +106,37 @@ final class FileSchemeHandler: NSObject, WKURLSchemeHandler {
         }
     }
 
+    #if os(iOS)
+    /// Plain text as a phone-sized page that wraps long lines.
+    private static func textPage(_ data: Data) -> Data {
+        let text = String(decoding: data, as: UTF8.self)
+            .replacingOccurrences(of: "&", with: "&amp;")
+            .replacingOccurrences(of: "<", with: "&lt;")
+        return Data(("""
+            <!doctype html><meta charset="utf-8">
+            <meta name="viewport" content="width=device-width, initial-scale=1">
+            <style>
+            :root { color-scheme: light dark }
+            body { margin: 14px; font: 13px ui-monospace, Menlo, monospace }
+            pre { margin: 0; white-space: pre-wrap; overflow-wrap: anywhere; font: inherit }
+            </style>
+            <pre>
+            """ + text + "</pre>").utf8)
+    }
+    #endif
+
     func webView(_ webView: WKWebView, stop task: WKURLSchemeTask) {
         stopped.insert(ObjectIdentifier(task))
     }
 }
 
-struct FileWebView: NSViewRepresentable {
+#if os(macOS)
+typealias WebViewRepresentable = NSViewRepresentable
+#else
+typealias WebViewRepresentable = UIViewRepresentable
+#endif
+
+struct FileWebView: WebViewRepresentable {
     let conn: ServerConnection
     let session: String
     let path: String
@@ -122,17 +156,40 @@ struct FileWebView: NSViewRepresentable {
         }
     }
 
-    func makeNSView(context: Context) -> WKWebView {
+    private func makeWebView(context: Context) -> WKWebView {
         let config = WKWebViewConfiguration()
         config.setURLSchemeHandler(FileSchemeHandler(conn: conn, session: session), forURLScheme: FileSchemeHandler.scheme)
+        #if os(iOS)
+        // Pages without a viewport (plain text, most generated HTML) would be
+        // laid out 980 px wide and shrunk to fit the phone.
+        config.userContentController.addUserScript(WKUserScript(source: """
+            if (!document.querySelector('meta[name=viewport]') && document.head) {
+              const m = document.createElement('meta');
+              m.name = 'viewport';
+              m.content = 'width=device-width, initial-scale=1';
+              document.head.appendChild(m);
+            }
+            """, injectionTime: .atDocumentEnd, forMainFrameOnly: true))
+        #endif
         let web = WKWebView(frame: .zero, configuration: config)
+        #if os(macOS)
         web.setValue(false, forKey: "drawsBackground")
+        #else
+        web.isOpaque = false
+        web.backgroundColor = .clear
+        #endif
         web.navigationDelegate = context.coordinator
         if let url = FileSchemeHandler.url(for: path) { web.load(URLRequest(url: url)) }
         return web
     }
 
+    #if os(macOS)
+    func makeNSView(context: Context) -> WKWebView { makeWebView(context: context) }
     func updateNSView(_ web: WKWebView, context: Context) {}
+    #else
+    func makeUIView(context: Context) -> WKWebView { makeWebView(context: context) }
+    func updateUIView(_ web: WKWebView, context: Context) {}
+    #endif
 }
 
 /// The preview window's content: the file rendered by WebKit (images, HTML,
@@ -146,6 +203,7 @@ struct FilePreviewView: View {
 
     private var conn: ServerConnection? { store.connection(request.server) }
 
+    #if os(macOS)
     /// On this Mac, the absolute path, for Open With….
     private var localPath: String? {
         guard let conn, conn.isLocal else { return nil }
@@ -184,28 +242,48 @@ struct FilePreviewView: View {
             .padding(.horizontal, 14)
             .padding(.vertical, 10)
             Rectangle().fill(theme.c.border).frame(height: 1)
-            if let conn {
-                FileWebView(conn: conn, session: request.session, path: request.path, failure: $failure)
-                    .overlay {
-                        if let failure {
-                            VStack(spacing: 8) {
-                                Image(systemName: "exclamationmark.triangle").font(.system(size: 26))
-                                Text(tr("Couldn't open the file")).font(theme.font(.headline))
-                                Text(failure).font(theme.font(.callout)).multilineTextAlignment(.center)
-                            }
-                            .foregroundStyle(theme.c.textMuted)
-                            .padding(30)
-                            .frame(maxWidth: .infinity, maxHeight: .infinity)
-                            .background(theme.c.background)
-                        }
-                    }
-            } else {
-                Text(tr("The server isn't connected"))
-                    .foregroundStyle(theme.c.textMuted)
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
-            }
+            content
         }
         .frame(minWidth: 720, idealWidth: 1000, minHeight: 520, idealHeight: 760)
         .background(theme.c.background)
+    }
+    #else
+    var body: some View {
+        NavigationStack {
+            content
+                .background(theme.c.background)
+                .navigationTitle((request.path as NSString).lastPathComponent)
+                .navigationBarTitleDisplayMode(.inline)
+                .toolbar {
+                    ToolbarItem(placement: .cancellationAction) {
+                        Button(tr("Close")) { dismiss() }
+                    }
+                }
+        }
+    }
+    #endif
+
+    @ViewBuilder
+    private var content: some View {
+        if let conn {
+            FileWebView(conn: conn, session: request.session, path: request.path, failure: $failure)
+                .overlay {
+                    if let failure {
+                        VStack(spacing: 8) {
+                            Image(systemName: "exclamationmark.triangle").font(.system(size: 26))
+                            Text(tr("Couldn't open the file")).font(theme.font(.headline))
+                            Text(failure).font(theme.font(.callout)).multilineTextAlignment(.center)
+                        }
+                        .foregroundStyle(theme.c.textMuted)
+                        .padding(30)
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                        .background(theme.c.background)
+                    }
+                }
+        } else {
+            Text(tr("The server isn't connected"))
+                .foregroundStyle(theme.c.textMuted)
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+        }
     }
 }

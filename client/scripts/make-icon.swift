@@ -1,29 +1,35 @@
-// Renders the Binary app icon into an .iconset directory.
+// Renders the Binary app icon into an .iconset directory, or (--ios) the
+// iOS app icon: one opaque 1024 px square that iOS rounds itself.
 // Usage: swift scripts/make-icon.swift <out.iconset>
+//        swift scripts/make-icon.swift --ios <AppIcon.png>
 import AppKit
 
-let out = CommandLine.arguments.count > 1 ? CommandLine.arguments[1] : "AppIcon.iconset"
-try? FileManager.default.createDirectory(atPath: out, withIntermediateDirectories: true)
+let ios = CommandLine.arguments.count > 2 && CommandLine.arguments[1] == "--ios"
+let out = CommandLine.arguments.count > 1 ? CommandLine.arguments.last! : "AppIcon.iconset"
 
-func render(_ px: Int) -> Data {
+func render(_ px: Int, fullBleed: Bool = false) -> Data {
     let rep = NSBitmapImageRep(bitmapDataPlanes: nil, pixelsWide: px, pixelsHigh: px, bitsPerSample: 8,
                                samplesPerPixel: 4, hasAlpha: true, isPlanar: false,
                                colorSpaceName: .deviceRGB, bytesPerRow: 0, bitsPerPixel: 0)!
     NSGraphicsContext.saveGraphicsState()
     NSGraphicsContext.current = NSGraphicsContext(bitmapImageRep: rep)
-    let s = CGFloat(px) / 1024
-    let rect = NSRect(x: 100 * s, y: 100 * s, width: 824 * s, height: 824 * s)
-    let shape = NSBezierPath(roundedRect: rect, xRadius: 185 * s, yRadius: 185 * s)
+    // Full bleed: the rounded square fills the canvas, everything in it scaled to match.
+    let s = CGFloat(px) / 1024 * (fullBleed ? 1024 / 824 : 1)
+    let rect = fullBleed ? NSRect(x: 0, y: 0, width: px, height: px)
+        : NSRect(x: 100 * s, y: 100 * s, width: 824 * s, height: 824 * s)
+    let shape = fullBleed ? NSBezierPath(rect: rect) : NSBezierPath(roundedRect: rect, xRadius: 185 * s, yRadius: 185 * s)
 
-    NSGraphicsContext.current?.saveGraphicsState()
-    let shadow = NSShadow()
-    shadow.shadowColor = NSColor.black.withAlphaComponent(0.35)
-    shadow.shadowOffset = NSSize(width: 0, height: -10 * s)
-    shadow.shadowBlurRadius = 24 * s
-    shadow.set()
-    NSColor.black.setFill()
-    shape.fill()
-    NSGraphicsContext.current?.restoreGraphicsState()
+    if !fullBleed {
+        NSGraphicsContext.current?.saveGraphicsState()
+        let shadow = NSShadow()
+        shadow.shadowColor = NSColor.black.withAlphaComponent(0.35)
+        shadow.shadowOffset = NSSize(width: 0, height: -10 * s)
+        shadow.shadowBlurRadius = 24 * s
+        shadow.set()
+        NSColor.black.setFill()
+        shape.fill()
+        NSGraphicsContext.current?.restoreGraphicsState()
+    }
 
     NSGradient(colors: [NSColor(red: 0.16, green: 0.15, blue: 0.24, alpha: 1),
                         NSColor(red: 0.06, green: 0.06, blue: 0.09, alpha: 1)])!
@@ -48,9 +54,20 @@ func render(_ px: Int) -> Data {
     NSBezierPath(ovalIn: dot).fill()
 
     NSGraphicsContext.restoreGraphicsState()
-    return rep.representation(using: .png, properties: [:])!
+    guard fullBleed else { return rep.representation(using: .png, properties: [:])! }
+    // iOS wants no alpha channel: redraw onto an opaque bitmap.
+    let ctx = CGContext(data: nil, width: px, height: px, bitsPerComponent: 8, bytesPerRow: 0,
+                        space: CGColorSpace(name: CGColorSpace.sRGB)!, bitmapInfo: CGImageAlphaInfo.noneSkipLast.rawValue)!
+    ctx.draw(rep.cgImage!, in: CGRect(x: 0, y: 0, width: px, height: px))
+    return NSBitmapImageRep(cgImage: ctx.makeImage()!).representation(using: .png, properties: [:])!
 }
 
+if ios {
+    try! render(1024, fullBleed: true).write(to: URL(fileURLWithPath: out))
+    exit(0)
+}
+
+try? FileManager.default.createDirectory(atPath: out, withIntermediateDirectories: true)
 for base in [16, 32, 128, 256, 512] {
     try! render(base).write(to: URL(fileURLWithPath: "\(out)/icon_\(base)x\(base).png"))
     try! render(base * 2).write(to: URL(fileURLWithPath: "\(out)/icon_\(base)x\(base)@2x.png"))

@@ -52,6 +52,7 @@ struct PlanWindowRow: View {
     }
 }
 
+#if os(macOS)
 /// Plan usage at the bottom of the sidebar: one server's weekly and 5-hour
 /// windows, with a menu to pick the server and a popover listing them all.
 struct UsageFooter: View {
@@ -115,6 +116,7 @@ struct UsageFooter: View {
         }
     }
 }
+#endif
 
 /// Every server's plan windows, with reset times.
 struct UsageDetail: View {

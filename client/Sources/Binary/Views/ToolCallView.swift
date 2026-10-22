@@ -12,6 +12,12 @@ struct ToolCallView: View {
     @State private var hover = false
 
     private var name: String { use.name ?? tr("Tool") }
+    /// Vertical inset of a collapsed line: a finger needs more room than a pointer.
+    #if os(macOS)
+    private static let lineInset: CGFloat = 3
+    #else
+    private static let lineInset: CGFloat = 6
+    #endif
     private var input: JSONValue { use.input ?? .object([:]) }
 
     var body: some View {
@@ -89,7 +95,7 @@ struct ToolCallView: View {
             Chevron(expanded: false).opacity(hover ? 1 : 0)
         }
         .padding(.horizontal, 6)
-        .padding(.vertical, 3)
+        .padding(.vertical, Self.lineInset)
         .contentShape(Rectangle())
     }
 
@@ -118,6 +124,38 @@ struct ToolCallView: View {
 struct SubagentOpener {
     var find: (_ description: String, _ prompt: String) -> SessionRef?
     var open: (SessionRef) -> Void
+}
+
+extension SubagentOpener {
+    /// Matches a Task/Agent tool call to a subagent of this session.
+    @MainActor
+    static func forSession(_ conn: ServerConnection, _ id: String, nav: Navigation) -> SubagentOpener? {
+        guard let list = conn.subagents[id], !list.isEmpty else { return nil }
+        return SubagentOpener(find: { desc, prompt in
+            let d = squash(desc)
+            let p = squash(prompt)
+            // Exact: the subagent's full prompt (cut at 4000 chars) against the call's.
+            if !p.isEmpty, let exact = list.first(where: { a in
+                guard let ap = a.prompt.map(squash), !ap.isEmpty else { return false }
+                return ap == p || (a.prompt!.count >= 4000 && p.hasPrefix(ap))
+            }) {
+                return SessionRef(server: conn.id, session: id, agent: exact.id)
+            }
+            let hit = list.first { a in
+                // The server titles a subagent with its prompt, whitespace
+                // collapsed and cut off with "…"; older ones used the description.
+                var t = squash(a.title ?? "")
+                if t.hasSuffix("…") { t = squash(String(t.dropLast())) }
+                guard !t.isEmpty else { return false }
+                return t == d || (!p.isEmpty && (p.hasPrefix(t) || t.hasPrefix(String(p.prefix(60)))))
+            }
+            return hit.map { SessionRef(server: conn.id, session: id, agent: $0.id) }
+        }, open: { ref in nav.selection = ref })
+    }
+
+    static func squash(_ s: String) -> String {
+        s.split(whereSeparator: { $0.isWhitespace }).joined(separator: " ")
+    }
 }
 
 private struct SubagentOpenerKey: EnvironmentKey {

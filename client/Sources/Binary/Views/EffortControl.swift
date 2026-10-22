@@ -23,6 +23,13 @@ extension Theme {
 
 /// The effort button in the controls bar.
 struct EffortButton: View {
+    /// Where the popover's arrow points from: the Mac puts it below the
+    /// button when there's room; a phone needs it above, over the conversation.
+    #if os(macOS)
+    private static let arrowEdge: Edge = .top
+    #else
+    private static let arrowEdge: Edge = .bottom
+    #endif
     let controller: SessionController
     var showText = true
     var onCustomModel: () -> Void
@@ -34,11 +41,13 @@ struct EffortButton: View {
             ControlLabel(icon: "gauge.with.dots.needle.50percent", text: effort.value, note: effort.note, showText: showText)
         }
         .buttonStyle(.plain)
-        .popover(isPresented: $open, arrowEdge: .top) {
+        .popover(isPresented: $open, arrowEdge: Self.arrowEdge) {
             EffortPanel(controller: controller, onCustomModel: {
                 open = false
                 onCustomModel()
             })
+            // A popover on the phone too, not a sheet over the conversation.
+            .presentationCompactAdaptation(.popover)
         }
         .help(tr("Effort and model (⌘[ / ⌘] to step)"))
         .task {

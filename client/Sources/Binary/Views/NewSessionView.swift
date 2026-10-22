@@ -77,7 +77,11 @@ struct NewSessionView: View {
             Button("") { newProject() }.keyboardShortcut("0", modifiers: [.command, .option]).hidden()
         }
         .navigationTitle(parent == nil ? tr("New Session") : tr("New Child Session"))
+        #if os(macOS)
         .navigationSubtitle(conn?.displayName ?? "")
+        #else
+        .navigationBarTitleDisplayMode(.inline)
+        #endif
         .onAppear(perform: setUp)
         .onDisappear { paste.remove(); composingWatcher.remove() }
         .onChange(of: focused) { _, f in paste.active = f }
@@ -133,7 +137,7 @@ struct NewSessionView: View {
                     .foregroundStyle(theme.c.warning)
             }
         }
-        .padding(.horizontal, 28)
+        .padding(.horizontal, theme.gutter)
     }
 
     // MARK: Composer
@@ -150,13 +154,7 @@ struct NewSessionView: View {
             }
             if !images.isEmpty { AttachmentStrip(images: $images) }
             HStack(alignment: .bottom, spacing: 8) {
-                Button { add(ImageProcessor.pick()) } label: {
-                    Image(systemName: "plus")
-                        .font(.system(size: 13, weight: .semibold))
-                        .frame(width: 26, height: 28)
-                }
-                .buttonStyle(.icon(size: 26))
-                .help(tr("Attach images (or paste / drop them)"))
+                AttachButton { add($0) }
                 ZStack(alignment: .topLeading) {
                     if text.isEmpty && !composing {
                         theme.placeholder(folder.isEmpty ? tr("Choose a project below first…") : tr("What should Claude do?"))
@@ -184,13 +182,14 @@ struct NewSessionView: View {
                             Image(systemName: "arrow.up").font(.system(size: 13, weight: .bold))
                         }
                     }
-                    .frame(width: 28, height: 28)
+                    .frame(width: theme.sendButton, height: theme.sendButton)
                     .background(Circle().fill(canSend ? theme.c.accent : theme.c.border))
                     .foregroundStyle(canSend ? theme.c.onAccent : theme.c.textFaint)
                 }
                 .buttonStyle(.plain)
                 .disabled(!canSend)
                 .help(tr("Start the session (↩)"))
+                .accessibilityLabel(tr("Start the session"))
             }
             .padding(.leading, 6)
             .padding(.trailing, 8)
@@ -203,7 +202,7 @@ struct NewSessionView: View {
             controls
                 .padding(.horizontal, 4)
         }
-        .padding(.horizontal, 28)
+        .padding(.horizontal, theme.gutter)
         .padding(.top, 6)
         .padding(.bottom, 10)
         .frame(maxWidth: theme.readingWidth)
@@ -214,11 +213,20 @@ struct NewSessionView: View {
     // MARK: Controls
 
     private var controls: some View {
+        #if os(macOS)
         ViewThatFits(in: .horizontal) {
             controlBar(text: true)
             controlBar(text: false)
         }
         .lineLimit(1)
+        #else
+        // A phone is too narrow for every setting with its value: scroll.
+        ScrollView(.horizontal) {
+            controlBar(text: true)
+                .lineLimit(1)
+        }
+        .scrollIndicators(.never)
+        #endif
     }
 
     private func controlBar(text showText: Bool) -> some View {
@@ -399,6 +407,11 @@ struct NewSessionView: View {
             if let p = projects.project(last.project) { choose(p) } else { pickFolder(server: last.server, last.folder) }
         } else if let p = store.orderedConnections.lazy.compactMap({ c in self.projects.projects(on: c.id).first }).first {
             choose(p)
+        } else if let latest = store.orderedConnections.lazy.compactMap({ c in
+            c.sessions.values.filter { !c.isViewOnly($0) }.max { $0.updatedAt < $1.updatedAt }.map { (c.id, $0.cwd) }
+        }).first {
+            // Nothing started from this client yet: the folder of the latest session.
+            pick(server: latest.0, latest.1)
         }
         if DebugHooks.env["BINARY_PROJECT_PICKER"] == "1" {
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.8) { picking = true }

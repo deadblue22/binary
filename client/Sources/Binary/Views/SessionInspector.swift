@@ -1,5 +1,7 @@
-import AppKit
 import SwiftUI
+#if os(macOS)
+import AppKit
+#endif
 
 /// The right-hand panel: where a session runs, how it is organized, what it
 /// has used, and the sessions and subagents it started.
@@ -99,11 +101,13 @@ struct SessionInspector: View {
                 Button { copy(s.cwd) } label: { Image(systemName: "doc.on.doc") }
                     .buttonStyle(.icon(size: 20))
                     .help(tr("Copy path"))
+                #if os(macOS)
                 if conn.isLocal {
                     Button { NSWorkspace.shared.selectFile(nil, inFileViewerRootedAtPath: s.cwd) } label: { Image(systemName: "arrow.up.forward.app") }
                         .buttonStyle(.icon(size: 20))
                         .help(tr("Show in Finder"))
                 }
+                #endif
             }
             if let b = s.gitBranch, !b.isEmpty, b != "HEAD" {
                 InfoRow(icon: "arrow.triangle.branch", label: tr("Branch"), value: b, mono: true)
@@ -296,6 +300,7 @@ struct SessionInspector: View {
 
 // MARK: - Pieces
 
+#if os(macOS)
 /// Widths that keep sidebar + transcript + info panel inside the window. The
 /// split view holds the transcript at roughly 330pt and the panel at its
 /// starting width, so the window minimum has to cover all three.
@@ -335,6 +340,7 @@ private struct InspectorHost<I: View>: ViewModifier {
         }
     }
 }
+#endif
 
 struct InspectorCard<Content: View>: View {
     let title: String

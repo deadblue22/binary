@@ -1,5 +1,7 @@
-import AppKit
 import SwiftUI
+#if os(macOS)
+import AppKit
+#endif
 
 /// Development hooks driven by environment variables, used to check the UI
 /// without screen recording:
@@ -55,6 +57,7 @@ enum DebugHooks {
         FileHandle.standardError.write(Data("timing \(what) \(Int(Date().timeIntervalSince(t) * 1000))ms\n".utf8))
     }
 
+    #if os(macOS)
     static func run(store: ServerStore, nav: Navigation, appearance: AppearanceStore) {
         if env["BINARY_TOGGLE_INSPECTOR"] == "1" {
             DispatchQueue.main.asyncAfter(deadline: .now() + 2.5) { appearance.showInspector.toggle() }
@@ -301,4 +304,5 @@ enum DebugHooks {
         }
         return lines.joined(separator: "\n")
     }
+    #endif
 }

@@ -3,3 +3,5 @@
 /client/.swiftpm/
 .DS_Store
 *.test
+/client/iOS/Binary.xcodeproj/
+/client/iOS/build/

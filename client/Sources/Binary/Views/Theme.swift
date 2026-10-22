@@ -1,6 +1,10 @@
-import AppKit
 import Observation
 import SwiftUI
+#if os(macOS)
+import AppKit
+#else
+import UIKit
+#endif
 
 // MARK: - Settings
 
@@ -177,11 +181,22 @@ final class AppearanceStore {
 
     /// Applies the light/dark choice to every window, menu and alert.
     func apply() {
+        #if os(macOS)
         guard let app = NSApp else { return }
         switch mode {
         case .system: app.appearance = nil
         case .light: app.appearance = NSAppearance(named: .aqua)
         case .dark: app.appearance = NSAppearance(named: .darkAqua)
+        }
+        #endif
+    }
+
+    /// The light/dark choice for `preferredColorScheme` (iOS has no app-wide appearance).
+    var colorScheme: ColorScheme? {
+        switch mode {
+        case .system: return nil
+        case .light: return .light
+        case .dark: return .dark
         }
     }
 
@@ -202,6 +217,26 @@ final class AppearanceStore {
         let stored = Stored(style: style, mode: mode, fontSize: fontSize, language: language, inspector: showInspector)
         guard let data = try? enc.encode(stored) else { return }
         ClientFiles.write(data, to: fileURL)
+    }
+}
+
+extension View {
+    /// Injects the appearance store, the resolved theme and its tint.
+    func themed(_ appearance: AppearanceStore) -> some View {
+        modifier(ThemedRoot(appearance: appearance))
+    }
+}
+
+private struct ThemedRoot: ViewModifier {
+    let appearance: AppearanceStore
+
+    func body(content: Content) -> some View {
+        let theme = appearance.theme
+        content
+            .environment(appearance)
+            .environment(\.theme, theme)
+            .tint(theme.c.focus)
+            .font(theme.font(.body))
     }
 }
 
@@ -265,6 +300,18 @@ struct Theme: Equatable, Sendable {
     var monoLineSpacing: CGFloat { (base * 0.22).rounded() }
     /// Reading width of the transcript column.
     var readingWidth: CGFloat { 860 * min(scale, 1.25) }
+    /// Side margin of the transcript and the message box; a phone has no room to spare.
+    #if os(macOS)
+    var gutter: CGFloat { 28 }
+    #else
+    var gutter: CGFloat { 14 }
+    #endif
+    /// The round send / stop buttons in the message box (bigger for a finger).
+    #if os(macOS)
+    var sendButton: CGFloat { 28 }
+    #else
+    var sendButton: CGFloat { 32 }
+    #endif
 
     func size(_ r: TextRole) -> CGFloat {
         switch r {
@@ -319,7 +366,11 @@ enum TextRole {
 
 /// Primary's typefaces, used when they are installed.
 enum Fonts {
+    #if os(macOS)
     static let families = Set(NSFontManager.shared.availableFontFamilies)
+    #else
+    static let families = Set(UIFont.familyNames)
+    #endif
     static let inter = families.contains("Inter")
     static let cascadia: String? = ["Cascadia Code", "Cascadia Mono"].first { families.contains($0) }
 }
@@ -482,38 +533,49 @@ extension Palette {
 extension Color {
     /// A color that resolves per appearance (light / dark).
     static func dyn(_ light: UInt32, _ dark: UInt32) -> Color {
-        dynamic(NSColor.rgb(light), NSColor.rgb(dark))
+        dynamic(PlatformColor.rgb(light), PlatformColor.rgb(dark))
     }
 
     static func dynA(_ light: UInt32, _ la: CGFloat, _ dark: UInt32, _ da: CGFloat) -> Color {
-        dynamic(NSColor.rgb(light).withAlphaComponent(la), NSColor.rgb(dark).withAlphaComponent(da))
+        dynamic(PlatformColor.rgb(light).withAlphaComponent(la), PlatformColor.rgb(dark).withAlphaComponent(da))
     }
 
     static func hsl(_ h: CGFloat, _ s: CGFloat, _ l: CGFloat, dark d: (CGFloat, CGFloat, CGFloat)) -> Color {
-        dynamic(NSColor.hsl(h, s, l), NSColor.hsl(d.0, d.1, d.2))
+        dynamic(PlatformColor.hsl(h, s, l), PlatformColor.hsl(d.0, d.1, d.2))
     }
 
     static func hsla(_ h: CGFloat, _ s: CGFloat, _ l: CGFloat, _ a: CGFloat, dark d: (CGFloat, CGFloat, CGFloat, CGFloat)) -> Color {
-        dynamic(NSColor.hsl(h, s, l, a), NSColor.hsl(d.0, d.1, d.2, d.3))
+        dynamic(PlatformColor.hsl(h, s, l, a), PlatformColor.hsl(d.0, d.1, d.2, d.3))
     }
 
-    static func dynamic(_ light: NSColor, _ dark: NSColor) -> Color {
+    static func dynamic(_ light: PlatformColor, _ dark: PlatformColor) -> Color {
+        #if os(macOS)
         Color(nsColor: NSColor(name: nil) { appearance in
             appearance.bestMatch(from: [.aqua, .darkAqua]) == .darkAqua ? dark : light
         })
+        #else
+        Color(uiColor: UIColor { traits in traits.userInterfaceStyle == .dark ? dark : light })
+        #endif
     }
 }
 
-extension NSColor {
-    static func rgb(_ hex: UInt32) -> NSColor {
-        NSColor(srgbRed: CGFloat((hex >> 16) & 0xFF) / 255,
-                green: CGFloat((hex >> 8) & 0xFF) / 255,
-                blue: CGFloat(hex & 0xFF) / 255,
-                alpha: 1)
+extension PlatformColor {
+    static func srgb(_ r: CGFloat, _ g: CGFloat, _ b: CGFloat, _ a: CGFloat = 1) -> PlatformColor {
+        #if os(macOS)
+        NSColor(srgbRed: r, green: g, blue: b, alpha: a)
+        #else
+        UIColor(red: r, green: g, blue: b, alpha: a)
+        #endif
+    }
+
+    static func rgb(_ hex: UInt32) -> PlatformColor {
+        srgb(CGFloat((hex >> 16) & 0xFF) / 255,
+             CGFloat((hex >> 8) & 0xFF) / 255,
+             CGFloat(hex & 0xFF) / 255)
     }
 
     /// CSS-style hsl(): hue in degrees, saturation and lightness in percent.
-    static func hsl(_ h: CGFloat, _ s: CGFloat, _ l: CGFloat, _ a: CGFloat = 1) -> NSColor {
+    static func hsl(_ h: CGFloat, _ s: CGFloat, _ l: CGFloat, _ a: CGFloat = 1) -> PlatformColor {
         let s = s / 100, l = l / 100
         let c = (1 - abs(2 * l - 1)) * s
         let hp = (h.truncatingRemainder(dividingBy: 360)) / 60
@@ -528,6 +590,6 @@ extension NSColor {
         default: rgb = (c, 0, x)
         }
         let m = l - c / 2
-        return NSColor(srgbRed: rgb.0 + m, green: rgb.1 + m, blue: rgb.2 + m, alpha: a)
+        return srgb(rgb.0 + m, rgb.1 + m, rgb.2 + m, a)
     }
 }

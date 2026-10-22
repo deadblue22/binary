@@ -1,6 +1,6 @@
 DIST := $(CURDIR)/dist
 
-.PHONY: all server app test clean
+.PHONY: all server app ios test clean
 
 all: server app
 
@@ -12,9 +12,13 @@ server:
 app:
 	OUT=$(DIST) client/scripts/build-app.sh
 
+# The iOS app, for the simulator (needs Xcode and xcodegen); see the README for devices.
+ios:
+	client/scripts/build-ios.sh
+
 test:
 	cd server && npm test
 	cd client && swift build
 
 clean:
-	rm -rf $(DIST) client/.build server/dist
+	rm -rf $(DIST) client/.build server/dist client/iOS/build client/iOS/Binary.xcodeproj

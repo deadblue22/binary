@@ -1,12 +1,5 @@
 import SwiftUI
 
-/// Where a new session starts: a saved project, or just a folder.
-struct StartTarget: Codable, Hashable {
-    var server: UUID
-    var folder: String
-    var project: UUID?
-}
-
 // MARK: - Picker
 
 /// The project list in the New Session sheet, after Claude desktop's

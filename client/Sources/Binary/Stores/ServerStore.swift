@@ -96,8 +96,9 @@ final class ServerStore {
     }
 
     /// Reads a binaryd config on this Mac (~/.binary/server.json) so a local
-    /// server works with no setup.
+    /// server works with no setup. A phone runs no binaryd.
     static func localServerConfig() -> ServerConfig? {
+        #if os(macOS)
         let home = FileManager.default.homeDirectoryForCurrentUser
         let dir = ProcessInfo.processInfo.environment["BINARY_HOME"].map { URL(fileURLWithPath: $0) }
             ?? home.appendingPathComponent(".binary")
@@ -110,5 +111,8 @@ final class ServerStore {
         }
         let scheme = (cfg.tlsCert ?? "").isEmpty ? "http" : "https"
         return ServerConfig(name: tr("This Mac"), url: "\(scheme)://\(listen)", token: cfg.token)
+        #else
+        return nil
+        #endif
     }
 }

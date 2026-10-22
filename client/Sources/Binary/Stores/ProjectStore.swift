@@ -75,6 +75,13 @@ struct Project: Codable, Hashable, Identifiable, Sendable {
     }
 }
 
+/// Where a new session starts: a saved project, or just a folder.
+struct StartTarget: Codable, Hashable {
+    var server: UUID
+    var folder: String
+    var project: UUID?
+}
+
 /// How a new session starts in a project or folder.
 struct StartConfig: Codable, Hashable, Sendable {
     var branch: String?

@@ -1,4 +1,3 @@
-import AppKit
 import SwiftUI
 
 /// Block-level Markdown renderer: headings, paragraphs, lists, quotes, code
@@ -15,7 +14,7 @@ struct MarkdownView: View {
                 switch seg {
                 case .flow(let attributed):
                     // One selectable run for consecutive paragraphs, headings and lists.
-                    FlowText(text: attributed, linkColor: NSColor(theme.c.link))
+                    FlowText(text: attributed, linkColor: PlatformColor(theme.c.link))
                         .frame(maxWidth: .infinity, alignment: .leading)
                 case .block(let block):
                     MarkdownBlockView(block: block, role: role)

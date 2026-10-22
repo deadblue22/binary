@@ -1,5 +1,6 @@
 import SwiftUI
 
+#if os(macOS)
 struct SessionDetailView: View {
     @Bindable var controller: SessionController
     @Environment(\.theme) private var theme
@@ -48,7 +49,7 @@ struct SessionDetailView: View {
                             PermissionCard(req: req, controller: controller)
                         }
                     }
-                    .padding(.horizontal, 28)
+                    .padding(.horizontal, theme.gutter)
                     .padding(.vertical, 10)
                     .frame(maxWidth: theme.readingWidth)
                     .frame(maxWidth: .infinity)
@@ -142,41 +143,15 @@ struct SessionDetailView: View {
             .disabled(summary?.live != true)
     }
 
-    static func squash(_ s: String) -> String {
-        s.split(whereSeparator: { $0.isWhitespace }).joined(separator: " ")
-    }
-
     /// Matches a Task/Agent tool call to a subagent of this session.
     private var opener: SubagentOpener? {
-        let conn = controller.conn
-        let id = controller.id
-        guard let list = conn.subagents[id], !list.isEmpty else { return nil }
-        let nav = nav
-        return SubagentOpener(find: { desc, prompt in
-            let d = Self.squash(desc)
-            let p = Self.squash(prompt)
-            // Exact: the subagent's full prompt (cut at 4000 chars) against the call's.
-            if !p.isEmpty, let exact = list.first(where: { a in
-                guard let ap = a.prompt.map(Self.squash), !ap.isEmpty else { return false }
-                return ap == p || (a.prompt!.count >= 4000 && p.hasPrefix(ap))
-            }) {
-                return SessionRef(server: conn.id, session: id, agent: exact.id)
-            }
-            let hit = list.first { a in
-                // The server titles a subagent with its prompt, whitespace
-                // collapsed and cut off with "…"; older ones used the description.
-                var t = Self.squash(a.title ?? "")
-                if t.hasSuffix("…") { t = Self.squash(String(t.dropLast())) }
-                guard !t.isEmpty else { return false }
-                return t == d || (!p.isEmpty && (p.hasPrefix(t) || t.hasPrefix(String(p.prefix(60)))))
-            }
-            return hit.map { SessionRef(server: conn.id, session: id, agent: $0.id) }
-        }, open: { ref in nav.selection = ref })
+        .forSession(controller.conn, controller.id, nav: nav)
     }
 }
+#endif
 
 /// Over a transcript shown from the local cache until the server answers.
-private struct SavedCopyHint: View {
+struct SavedCopyHint: View {
     let offline: Bool
     @Environment(\.theme) private var theme
 
@@ -229,7 +204,7 @@ struct ViewOnlyBar: View {
         }
         .padding(12)
         .card(fill: theme.c.surfaceAlt, shadow: false)
-        .padding(.horizontal, 28)
+        .padding(.horizontal, theme.gutter)
         .padding(.top, 6)
         .padding(.bottom, 14)
         .frame(maxWidth: theme.readingWidth)
@@ -238,6 +213,7 @@ struct ViewOnlyBar: View {
     }
 }
 
+#if os(macOS)
 /// Toolbar button that shows or hides the session info panel (⌥⌘I).
 struct InspectorToggle: View {
     @Environment(AppearanceStore.self) private var appearance
@@ -252,6 +228,7 @@ struct InspectorToggle: View {
         .keyboardShortcut("i", modifiers: [.command, .option])
     }
 }
+#endif
 
 struct NoticeBar: View {
     let text: String

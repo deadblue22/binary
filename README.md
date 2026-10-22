@@ -4,6 +4,7 @@ A client/server tool for managing Claude Code sessions on your own machine or on
 
 - **binaryd** (server, TypeScript / Node.js): runs on the machine you want to manage (macOS / Linux). Every interaction with Claude Code goes through the **official Claude Agent SDK** (plus `claude agents --json`, which Claude Code provides for scripts): it doesn't modify Claude Code, doesn't implement internal protocols, and never touches your login credentials.
 - **Binary.app** (client, SwiftUI, macOS 14+): connects to several servers at once to view and work with their sessions.
+- **Binary for iOS** (client, SwiftUI, iOS 17+): the same client on iPhone and iPad, built from the same sources and installed from Xcode onto your own device (see [iPhone and iPad](#iphone-and-ipad)).
 
 ![Binary screenshot](docs/screenshot.png)
 
@@ -83,6 +84,39 @@ Stop the running server before upgrading or rebuilding (`npm install` replaces d
    - Or serve HTTPS directly with `binaryd serve --listen 0.0.0.0:7350 --tls-cert cert.pem --tls-key key.pem`.
 
    Then in the client, go to "Settings → Servers → +", enter the address and token (printed by `binaryd token` on the server), click "Test Connection", then "Add".
+
+## iPhone and iPad
+
+`client/iOS` is an iOS 17+ app built from the same models, networking, stores and conversation views as the Mac client (those files compile for both platforms), with its own phone navigation, session list and settings. It isn't on the App Store: you build it and install it on your own device.
+
+Requirements: Xcode with the iOS SDK, and [XcodeGen](https://github.com/yonaskolb/XcodeGen) (`brew install xcodegen`), which generates the Xcode project.
+
+```bash
+make ios                                # simulator build
+client/scripts/build-ios.sh --device    # build, install and launch on the connected iPhone
+```
+
+To install on a device, sign in to Xcode with an Apple ID first (Xcode → Settings → Accounts; a free Personal Team works, but what it signs runs for 7 days, then install again), turn on Developer Mode on the phone (Settings → Privacy & Security), and the first time, trust the developer under Settings → General → VPN & Device Management. The script uses the first team Xcode knows and the first paired device; `BINARY_TEAM=<team id>`, `BINARY_IOS_BUNDLE_ID=<bundle id>` (default `dev.binary.ios.<team id>`) and a UDID after `--device` override them.
+
+**Connecting.** binaryd listens only on `127.0.0.1` by default, which the phone can't reach, so give each server an address it can. Tailscale is the simplest (install it on the phone too); on the Mac or server:
+
+```bash
+sudo tailscale serve --bg --https 7350 http://127.0.0.1:7350
+```
+
+Then in the app, Settings → Add Server → Paste from Clipboard takes what `binaryd token` prints (with Universal Clipboard, copy it on the Mac); change the URL to `https://<machine>.<tailnet>.ts.net:7350` and Test Connection.
+
+**How it differs from the Mac client:**
+
+| | |
+|---|---|
+| Layout | Session list → conversation → subagent, as a navigation stack. Tap the title for the session menu (rename, child session, copy ID / resume command / directory, stop process); ⓘ opens the info panel as a sheet |
+| Session list | The sidebar's sections: pinned, groups across servers, each server's sessions, with child sessions and subagents nested under the count at the end of a row. Swipe right to pin, left to archive; long press for groups, rename and the rest; pull down to reconnect |
+| Message box | Return inserts a new line; send with the button. + attaches from Photos or pastes an image from the clipboard. Permission mode, model and effort sit below it and scroll sideways |
+| Background | iOS cuts an app's connections soon after it leaves the screen. For the short time it still runs (about 30 seconds), approvals, finished turns and errors notify as on the Mac; coming back reconnects and catches up. There are no push notifications |
+| Not on iOS | Menu keyboard shortcuts, drag and drop, multiple selection, Finder actions; files linked in messages open in the preview sheet only |
+
+The app keeps its settings, projects and cache in its own container, in the same files as the Mac client, separately from it.
 
 ## Using the client
 
@@ -243,10 +277,11 @@ curl -N -H "Authorization: Bearer $TOKEN" http://127.0.0.1:7350/api/v1/sessions/
 ## Development
 
 ```
-server/   binaryd (TypeScript): src/ modules are described in docs/DESIGN.md "3.1 Modules"
-          bench/ measurement scripts: SDK read time (session-read), event loop stalls (loop-lag, probe-stalls)
-client/   Binary.app (SwiftUI, SwiftPM): Sources/Binary/{App,Models,Network,Stores,Views}
-docs/     design docs
+server/       binaryd (TypeScript): src/ modules are described in docs/DESIGN.md "3.1 Modules"
+              bench/ measurement scripts: SDK read time (session-read), event loop stalls (loop-lag, probe-stalls)
+client/       Binary.app (SwiftUI, SwiftPM): Sources/Binary/{App,Models,Network,Stores,Views}
+client/iOS/   the iOS app (XcodeGen project.yml): iOS-only Sources/, plus the shared files listed in project.yml
+docs/         design docs
 ```
 
 ```bash
@@ -280,6 +315,8 @@ Development environment variables for the client (for checking the UI without sc
 | `BINARY_LOAD_OLDER=1` | Click "Load earlier messages" once, 2.5 seconds after opening a session |
 | `BINARY_LOG=1` | Print the steps of sidebar expand-and-reveal and copy jumps to stderr |
 
+The iOS app reads its own set (see `client/iOS/Sources/App/PhoneDebugHooks.swift`), passed with `SIMCTL_CHILD_<name>=… xcrun simctl launch <device> <bundle id>`: `BINARY_SELECT`, `BINARY_SELECT_SERVER`, `BINARY_SELECT_AGENT`, `BINARY_NEW_SESSION`, `BINARY_INFO=1` (info sheet), `BINARY_SETTINGS=1`, `BINARY_SET_LANGUAGE`, `BINARY_NO_NOTIFICATIONS=1`, `BINARY_SERVER` + `BINARY_TOKEN` (add a server), and `BINARY_SEND_TEXT`, `BINARY_EXPAND_TOOLS`, `BINARY_SCROLL_TOP` as above.
+
 ## Known limitations
 
 - Sessions held by another program (Claude desktop app, terminal, tmux, IDE): you can't see their output as it streams, answer their permission requests, or interrupt a turn they're running. Binary can keep talking at any time (before sending, it restarts its own process if needed to pick up the other side's latest progress); but that program's process only remembers the version it read itself, so before continuing over there, close and reopen the session there, or the conversation will fork.
@@ -288,6 +325,7 @@ Development environment variables for the client (for checking the UI without sc
 - Claude Code doesn't record parent/child relations between sessions. They come from two places: "New Child Session" in Binary, and the Claude desktop app's own session records (only five fields are read; this isn't a public interface, so if the desktop app changes its format, sessions simply stop being nested; turn it off with `desktopLinks: false`). Sessions started manually in a terminal have no parent/child relations.
 - Sessions the Claude desktop app runs on other machines over SSH appear in the local list as mirrored transcripts and are view-only; so are sessions whose working directory no longer exists locally. To work with remote sessions, deploy binaryd on that machine and add it as a server; the local copies are then hidden automatically.
 - The client is not signed (ad-hoc signature); if macOS blocks it on first launch, right-click it in Finder and choose "Open".
+- The iOS app gets no push notifications: once iOS suspends it in the background, it catches up when it comes back. Signed with a free Apple ID, it has to be installed again every 7 days.
 
 ## License
 

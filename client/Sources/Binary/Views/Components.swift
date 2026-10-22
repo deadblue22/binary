@@ -1,5 +1,9 @@
-import AppKit
 import SwiftUI
+#if os(macOS)
+import AppKit
+#else
+import UIKit
+#endif
 
 // Shared building blocks of Binary's visual language: buttons, cards, chips,
 // icon tiles and text-field chrome. Everything reads `@Environment(\.theme)`.
@@ -222,6 +226,7 @@ struct PlainField: View {
     }
 }
 
+#if os(macOS)
 extension View {
     /// ⇧↩ inserts a new line in a multi-line field while it has focus, like
     /// ⌥↩; plain ↩ still submits.
@@ -272,6 +277,12 @@ final class NewlineKeys {
         return (event.keyCode == 36 || event.keyCode == 76) && mods == .shift
     }
 }
+#else
+extension View {
+    /// iOS: Return already inserts a new line in a multi-line field.
+    func shiftReturnNewline(when focused: Bool) -> some View { self }
+}
+#endif
 
 // MARK: - Layout
 
@@ -382,6 +393,7 @@ struct Chevron: View {
 
 extension Color {
     func blend(_ other: Color, _ f: CGFloat) -> Color {
+        #if os(macOS)
         Color(nsColor: NSColor(name: nil) { appearance in
             var a = NSColor.clear, b = NSColor.clear
             appearance.performAsCurrentDrawingAppearance {
@@ -390,11 +402,21 @@ extension Color {
             }
             return a.blended(withFraction: f, of: b) ?? a
         })
+        #else
+        Color(uiColor: UIColor { traits in
+            var x: (CGFloat, CGFloat, CGFloat, CGFloat) = (0, 0, 0, 0), y = x
+            UIColor(self).resolvedColor(with: traits).getRed(&x.0, green: &x.1, blue: &x.2, alpha: &x.3)
+            UIColor(other).resolvedColor(with: traits).getRed(&y.0, green: &y.1, blue: &y.2, alpha: &y.3)
+            return UIColor(red: x.0 + (y.0 - x.0) * f, green: x.1 + (y.1 - x.1) * f,
+                           blue: x.2 + (y.2 - x.2) * f, alpha: x.3 + (y.3 - x.3) * f)
+        })
+        #endif
     }
 }
 
 // MARK: - Scrollers
 
+#if os(macOS)
 extension View {
     /// Put inside a ScrollView's content: makes that scroll view use slim,
     /// auto-hiding overlay scrollers even when macOS would show the wide
@@ -476,3 +498,18 @@ final class ComposingWatcher {
         monitor = nil
     }
 }
+#else
+extension View {
+    /// iOS scroll indicators are slim and auto-hiding already.
+    func slimScrollers() -> some View { self }
+}
+
+/// iOS: a text field's binding already holds the text being composed, so
+/// there is nothing to watch.
+@MainActor
+final class ComposingWatcher {
+    func install(_ update: @escaping (Bool) -> Void) {}
+    static func composing() -> Bool { false }
+    func remove() {}
+}
+#endif

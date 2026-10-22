@@ -70,15 +70,7 @@ struct ComposerView: View {
                     .foregroundStyle(theme.c.warning)
             }
             HStack(alignment: .bottom, spacing: 8) {
-                Button {
-                    add(ImageProcessor.pick())
-                } label: {
-                    Image(systemName: "plus")
-                        .font(.system(size: 13, weight: .semibold))
-                        .frame(width: 26, height: 28)
-                }
-                .buttonStyle(.icon(size: 26))
-                .help(tr("Attach images (or paste / drop them)"))
+                AttachButton { add($0) }
                 ZStack(alignment: .topLeading) {
                     if text.isEmpty && !composing {
                         // Drawn here so it takes the theme's faint color.
@@ -106,13 +98,14 @@ struct ComposerView: View {
                     } label: {
                         Image(systemName: "stop.fill")
                             .font(.system(size: 11, weight: .bold))
-                            .frame(width: 28, height: 28)
+                            .frame(width: theme.sendButton, height: theme.sendButton)
                             .background(Circle().fill(theme.c.danger.opacity(0.14)))
                             .foregroundStyle(theme.c.danger)
                     }
                     .buttonStyle(.plain)
                     .keyboardShortcut(".", modifiers: .command)
                     .help(tr("Interrupt this turn (⌘.)"))
+                    .accessibilityLabel(tr("Interrupt"))
                 }
                 if hold != nil {
                     // Also open elsewhere: a fork continues here and leaves
@@ -128,11 +121,12 @@ struct ComposerView: View {
                     .plainMenu()
                     .disabled(!canSend)
                     .help(tr("More ways to send"))
+                    .accessibilityLabel(tr("More ways to send"))
                 }
                 Button(action: submit) {
                     Image(systemName: "arrow.up")
                         .font(.system(size: 13, weight: .bold))
-                        .frame(width: 28, height: 28)
+                        .frame(width: theme.sendButton, height: theme.sendButton)
                         .background(Circle().fill(canSend ? theme.c.accent : theme.c.border))
                         .foregroundStyle(canSend ? theme.c.onAccent : theme.c.textFaint)
                 }
@@ -140,6 +134,7 @@ struct ComposerView: View {
                 .disabled(!canSend)
                 .help(heldBusy ? tr("Queue: sent when \(hold?.shortName ?? "") finishes this turn (↩)")
                       : busy ? tr("Queue: sent after the current turn") : tr("Send (↩) · ⇧↩ or ⌥↩ for a new line"))
+                .accessibilityLabel(tr("Send"))
             }
             .padding(.leading, 6)
             .padding(.trailing, 8)
@@ -152,7 +147,7 @@ struct ComposerView: View {
             SessionControls(controller: controller)
                 .padding(.horizontal, 4)
         }
-        .padding(.horizontal, 28)
+        .padding(.horizontal, theme.gutter)
         .padding(.top, 6)
         .padding(.bottom, 10)
         .frame(maxWidth: theme.readingWidth)
@@ -167,7 +162,7 @@ struct ComposerView: View {
                             .transition(.opacity.combined(with: .scale(scale: 0.96, anchor: .bottomTrailing)))
                     }
                 }
-                .padding(.trailing, 28)
+                .padding(.trailing, theme.gutter)
         }
         .frame(maxWidth: .infinity)
         .background(theme.c.background)
@@ -175,12 +170,15 @@ struct ComposerView: View {
             guard let level = controller.stepEffort(step.delta) else { return }
             showEffortHUD(level)
         }
+        #if os(macOS)
         .task {
             // Focus after a beat: moving focus walks the whole accessibility
             // tree, so skip it for sessions that are only passed through.
+            // (On a phone the keyboard would cover the conversation.)
             try? await Task.sleep(nanoseconds: 250_000_000)
             if !Task.isCancelled { focused = true }
         }
+        #endif
         .onAppear {
             paste.onImages = { add($0) }
             paste.active = true
@@ -350,6 +348,7 @@ struct SessionControls: View {
     let controller: SessionController
     @Environment(\.theme) private var theme
     @Environment(AppearanceStore.self) private var appearance
+    @Environment(Navigation.self) private var nav
     @State private var customModel = false
     @State private var customModelText = ""
 
@@ -363,7 +362,13 @@ struct SessionControls: View {
         ViewThatFits(in: .horizontal) {
             bar(.full)
             bar(.compact)
+            #if os(macOS)
             bar(.icons)
+            #else
+            // A phone keeps the names and scrolls instead.
+            ScrollView(.horizontal) { bar(.compact) }
+                .scrollIndicators(.never)
+            #endif
         }
         .alert(tr("Custom Model"), isPresented: $customModel) {
             TextField(tr("Model ID or alias, e.g. claude-opus-5-5"), text: $customModelText)
@@ -383,7 +388,11 @@ struct SessionControls: View {
                     : bg > 0 ? tr("\(bg) background task\(bg == 1 ? "" : "s")") : tr("Process idle")
                 Button {
                     // The info panel's Process card says what's running.
+                    #if os(macOS)
                     withAnimation(.easeOut(duration: 0.2)) { appearance.showInspector = true }
+                    #else
+                    nav.showingInfo = true
+                    #endif
                 } label: {
                     HStack(spacing: 4) {
                         StatusDot(state: s.shownState, live: s.live)
