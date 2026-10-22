@@ -475,31 +475,38 @@ struct SidebarView: View {
                 opened = true
             }
         }
-        if org.isServerCollapsed(ref.server) {
-            org.setServerCollapsed(ref.server, false)
-            opened = true
-        }
         if let a = ref.agent {
             expand(ref.sessionOnly)
             revealAgent(a, of: ref.sessionOnly, in: conn)
         }
-        // Parent links include those carried over from hidden mirror copies.
-        let extra = MirrorIndex(store.orderedConnections).parents[ref.server] ?? [:]
-        var root = conn.sessions[ref.session]
-        var seen: Set<String> = [ref.session]
-        var cur = root.flatMap { $0.parentId ?? extra[$0.id] }
-        while let p = cur, let parent = conn.sessions[p], seen.insert(p).inserted {
-            expand(SessionRef(server: ref.server, session: p))
-            root = parent
-            cur = parent.parentId ?? extra[parent.id]
+        // Open only what holds the row as the sidebar draws it: a session
+        // pinned or grouped apart from its parent isn't under that parent.
+        let mirrors = MirrorIndex(store.orderedConnections)
+        let sections = store.orderedConnections.map { SidebarBuilder.build($0, org: org, query: query, mirrors: mirrors) }
+        let place = SidebarBuilder.place(of: ref.sessionOnly, sections: sections, merged: SidebarBuilder.merge(sections, org: org))
+        switch place?.area {
+        case .pinned?:
+            if org.pinnedCollapsed {
+                org.pinnedCollapsed = false
+                opened = true
+            }
+        case .group(let g)?:
+            if org.isCollapsed(ref.server, g) {
+                org.toggleCollapsed(ref.server, g)
+                opened = true
+            }
+        case .server(foldable: true)?:
+            if org.isServerCollapsed(ref.server) {
+                org.setServerCollapsed(ref.server, false)
+                opened = true
+            }
+        default:
+            break
         }
-        if let g = root?.group, org.isCollapsed(ref.server, g) {
-            org.toggleCollapsed(ref.server, g)
-            opened = true
-        }
+        place?.ancestors.forEach(expand)
         // A nested row lives inside its top-level ancestor's block, which the
         // lazy list only builds near the viewport: bring the ancestor in first.
-        let top = root.map { SessionRef(server: ref.server, session: $0.id) }
+        let top = place?.ancestors.first
         DebugHooks.log("reveal \(ref.session.prefix(8)) opened=\(opened) top=\(top?.session.prefix(8) ?? "-")")
         DispatchQueue.main.asyncAfter(deadline: .now() + (opened ? 0.25 : 0.05)) {
             guard nav.selection == ref else { return }

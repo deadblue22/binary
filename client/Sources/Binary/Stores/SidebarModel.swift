@@ -118,6 +118,20 @@ struct MirrorIndex {
     init() {}
 }
 
+/// Where a row sits in the sidebar (see `SidebarBuilder.place`).
+struct RowPlace: Equatable {
+    enum Area: Equatable {
+        case pinned
+        case group(String)
+        /// A server's own section; folding it hides the row unless it's a
+        /// search or archive list.
+        case server(foldable: Bool)
+    }
+    var area: Area
+    /// Rows the session is nested under, outermost first.
+    var ancestors: [SessionRef]
+}
+
 @MainActor
 enum SidebarBuilder {
     static let recentWindow: TimeInterval = 3 * 86400
@@ -246,6 +260,37 @@ enum SidebarBuilder {
                 return r == .orderedSame ? a.updatedAt > b.updatedAt : r == .orderedAscending
             }
         }
+    }
+
+    /// Where a session's row is drawn: the area holding it and the rows it is
+    /// nested under (outermost first). A session pinned, or in another group
+    /// than its parent, stands on its own, so a parent link alone says
+    /// nothing about where it is. Nil when the row isn't in the list.
+    static func place(of session: SessionRef, sections: [SidebarSection], merged: MergedSidebar?) -> RowPlace? {
+        func path(in nodes: [SidebarNode], _ above: [SessionRef] = []) -> [SessionRef]? {
+            for n in nodes {
+                if n.ref == session { return above }
+                if let p = path(in: n.children, above + [n.ref]) { return p }
+            }
+            return nil
+        }
+        if let merged {
+            if let p = path(in: merged.pinned.map(\.node)) { return RowPlace(area: .pinned, ancestors: p) }
+            for g in merged.groups {
+                if let p = path(in: g.items.map(\.node)) { return RowPlace(area: .group(g.name), ancestors: p) }
+            }
+        }
+        for s in sections where s.conn.id == session.server {
+            if let flat = s.flat {
+                return path(in: flat).map { RowPlace(area: .server(foldable: false), ancestors: $0) }
+            }
+            if let p = path(in: s.pinned) { return RowPlace(area: .pinned, ancestors: p) }
+            for g in s.groups {
+                if let p = path(in: g.nodes) { return RowPlace(area: .group(g.name), ancestors: p) }
+            }
+            if let p = path(in: s.ungrouped) { return RowPlace(area: .server(foldable: true), ancestors: p) }
+        }
+        return nil
     }
 
     /// How many recent subagents show before "Show all".
