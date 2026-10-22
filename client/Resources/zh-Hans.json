@@ -139,6 +139,8 @@
  "Go to Path": "前往路径",
  "Go to Path…": "前往路径…",
  "Group": "分组",
+ "Group Order": "分组顺序",
+ "Group Order…": "分组顺序…",
  "Group name": "分组名称",
  "Group {0}, {1} sessions, {2}": "分组 {0}，{1} 个 session，{2}",
  "Groups live on the server (the session's tag) and show on every client.": "分组保存在服务端（session 的 tag），在所有客户端可见。",

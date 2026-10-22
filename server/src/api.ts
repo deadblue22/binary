@@ -266,6 +266,10 @@ export function createHandler(o: ApiOptions): (req: IncomingMessage, res: Server
     ok({ entries: await m.subagentEntries(params.id, params.agentId) }),
   );
 
+  // Pinned, archived and group order, shared by every client of this server.
+  route('GET', '/api/v1/layout', () => ok({ layout: m.layout() }));
+  route('PUT', '/api/v1/layout', async ({ req }) => ok({ layout: m.updateLayout(await readJSON(req)) }));
+
   // The account's plan usage (5-hour and weekly windows). ?refresh=1 reads it again now.
   route('GET', '/api/v1/usage', async ({ url }) => {
     const usage = await m.planUsage(url.searchParams.get('refresh') === '1');

@@ -79,6 +79,7 @@ const CATALOG = {
   worktreeExists: 'Worktree already exists: {path}',
   gitFailed: 'git failed: {detail}',
   envInvalid: 'Invalid environment variable: {name}',
+  layoutInvalid: '{field} must be a list of names',
   imageNotFound: 'Image not found or no longer cached',
   imageInvalid: 'Unsupported image (PNG, JPEG, GIF or WebP as base64)',
   imageTooLarge: 'Image too large (at most {max} MB each)',

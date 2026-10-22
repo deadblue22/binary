@@ -22,6 +22,7 @@ struct BinaryPhoneApp: App {
                 .preferredColorScheme(appearance.colorScheme)
                 .onAppear {
                     PhoneNotifier.shared.attach(store: store, nav: nav)
+                    organizer.sync(with: store)
                     PhoneDebugHooks.run(store: store, nav: nav, appearance: appearance)
                 }
         }

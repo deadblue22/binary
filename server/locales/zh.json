@@ -63,6 +63,7 @@
  "worktreeExists": "worktree 已存在: {path}",
  "gitFailed": "git 命令失败: {detail}",
  "envInvalid": "环境变量不合法: {name}",
+ "layoutInvalid": "{field} 必须是名称列表",
  "imageNotFound": "图片不存在或已过期",
  "imageInvalid": "不支持的图片（支持 PNG、JPEG、GIF、WebP 的 base64 数据）",
  "imageTooLarge": "图片过大（单张不超过 {max} MB）",

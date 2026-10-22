@@ -409,6 +409,32 @@ struct GitWorktree: Decodable, Sendable, Equatable {
     var branch: String?
 }
 
+/// Pinned and archived sessions and the group order, kept by newer servers
+/// so every client shows the same (GET / PUT /layout, and the "layout"
+/// event on the global stream). Each field is stamped with when a client
+/// last changed it (ms); 0 means never.
+struct SharedLayout: Codable, Equatable, Sendable {
+    struct Stamps: Codable, Equatable, Sendable {
+        var pinned: Double = 0
+        var archived: Double = 0
+        var groupOrder: Double = 0
+    }
+    var pinned: [String] = []
+    var archived: [String] = []
+    var groupOrder: [String] = []
+    var at = Stamps()
+}
+
+/// PUT /layout: the fields to set, each with when it changed here.
+struct LayoutUpdate: Encodable {
+    var pinned: [String]?
+    var archived: [String]?
+    var groupOrder: [String]?
+    var at: [String: Double] = [:]
+
+    var isEmpty: Bool { pinned == nil && archived == nil && groupOrder == nil }
+}
+
 struct SettingsUpdate: Encodable {
     var model: String?
     var effort: String?

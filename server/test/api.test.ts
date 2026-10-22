@@ -7,6 +7,7 @@ import { join } from 'node:path';
 import { createGunzip, gunzipSync } from 'node:zlib';
 import { after, before, test } from 'node:test';
 import { createHandler } from '../src/api.js';
+import { Store, type Layout } from '../src/store.js';
 import { harness, transcriptLine, writeTranscript, type Harness } from './helpers.js';
 
 let h: Harness;
@@ -107,6 +108,41 @@ test('event stream starts with a snapshot', async () => {
     }
   }
   ctrl.abort();
+});
+
+test('layout: newest change per field wins, shared over the event stream', async () => {
+  const empty = await call('GET', '/api/v1/layout');
+  assert.deepEqual(empty.json.layout, { pinned: [], archived: [], groupOrder: [], at: { pinned: 0, archived: 0, groupOrder: 0 } });
+
+  const set = await call('PUT', '/api/v1/layout', { pinned: ['a', 'b', 'a'], groupOrder: ['g2', 'g1'], at: { pinned: 200, groupOrder: 200 } });
+  assert.equal(set.status, 200);
+  assert.deepEqual((set.json.layout as Layout).pinned, ['a', 'b']);
+  // An older change (from a client that was offline) doesn't undo a newer one; other fields still apply.
+  const stale = await call('PUT', '/api/v1/layout', { pinned: ['c'], archived: ['x'], at: { pinned: 100, archived: 100 } });
+  assert.deepEqual(stale.json.layout, {
+    pinned: ['a', 'b'], archived: ['x'], groupOrder: ['g2', 'g1'], at: { pinned: 200, archived: 100, groupOrder: 200 },
+  });
+  assert.equal((await call('PUT', '/api/v1/layout', { pinned: 'a' })).status, 400);
+  assert.equal((await call('PUT', '/api/v1/layout', { archived: [1] })).status, 400);
+
+  // Clients get it right after the session list, and again whenever it changes.
+  const ctrl = new AbortController();
+  const res = await fetch(`${base}/api/v1/events`, { headers: { Authorization: `Bearer ${TOKEN}` }, signal: ctrl.signal });
+  const reader = res.body!.getReader();
+  let buf = '';
+  const layouts = () => [...buf.matchAll(/event: layout\ndata: (.*)\n\n/g)].map((m) => JSON.parse(m[1]).layout as Layout);
+  while (layouts().length < 1) buf += new TextDecoder().decode((await reader.read()).value);
+  assert.deepEqual(layouts()[0].pinned, ['a', 'b']);
+  // Without a time, the change is stamped now.
+  const now = await call('PUT', '/api/v1/layout', { pinned: [] });
+  assert.ok((now.json.layout as Layout).at.pinned > 200);
+  while (layouts().length < 2) buf += new TextDecoder().decode((await reader.read()).value);
+  assert.deepEqual(layouts()[1], now.json.layout);
+  ctrl.abort();
+
+  // It is kept across restarts.
+  h.manager.store.flush();
+  assert.deepEqual(new Store(join(h.root, 'home')).layout(), now.json.layout);
 });
 
 test('directory browsing', async () => {

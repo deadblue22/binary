@@ -32,6 +32,11 @@ final class ServerStore {
         didSet { for c in connections.values { c.onTransition = onTransition } }
     }
 
+    /// Forwarded to every connection; keeps the organizer in step with the servers.
+    @ObservationIgnored var onLayout: ((ServerConnection, SharedLayout) -> Void)? {
+        didSet { for c in connections.values { c.onLayout = onLayout } }
+    }
+
     private let fileURL = ClientFiles.url("servers.json")
 
     init() {
@@ -78,6 +83,7 @@ final class ServerStore {
     private func connect(_ config: ServerConfig) {
         let conn = ServerConnection(config: config)
         conn.onTransition = onTransition
+        conn.onLayout = onLayout
         connections[config.id] = conn
         conn.start()
     }

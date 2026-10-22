@@ -16,6 +16,7 @@ struct SessionListView: View {
     @State private var showAllAgents: Set<SessionRef> = []
     @State private var settings = false
     @State private var addingServer = false
+    @State private var orderingGroups = false
 
     private var searching: Bool { !query.trimmingCharacters(in: .whitespaces).isEmpty }
     private var multipleServers: Bool { store.orderedConnections.count > 1 }
@@ -28,7 +29,8 @@ struct SessionListView: View {
             if store.servers.isEmpty {
                 WelcomeCard { addingServer = true }
                     .listRowBackground(Color.clear)
-                    .listRowInsets(EdgeInsets())
+                    .listRowSeparator(.hidden)
+                    .listRowInsets(EdgeInsets(top: 8, leading: 12, bottom: 8, trailing: 12))
             }
             if let merged { mergedSections(merged) }
             ForEach(sections) { section in
@@ -36,12 +38,14 @@ struct SessionListView: View {
             }
             usageSection
         }
-        .listStyle(.sidebar)
+        .listStyle(.plain)
+        .environment(\.defaultMinListRowHeight, 28)
         .scrollContentBackground(.hidden)
         .background(theme.c.sidebar)
         .searchable(text: $query, prompt: tr("Search titles, folders, content, groups"))
         .refreshable { await refresh() }
-        .navigationTitle("Binary")
+        .navigationBarTitleDisplayMode(.inline)
+        .toolbarBackground(theme.c.sidebar, for: .navigationBar)
         .toolbar { toolbar }
         .safeAreaInset(edge: .bottom) {
             if let notice {
@@ -53,6 +57,7 @@ struct SessionListView: View {
             }
         }
         .sheet(isPresented: $settings) { SettingsSheet() }
+        .sheet(isPresented: $orderingGroups) { GroupOrderSheet() }
         .task {
             guard DebugHooks.env["BINARY_SETTINGS"] == "1" else { return }
             try? await Task.sleep(nanoseconds: 1_000_000_000)
@@ -97,6 +102,8 @@ struct SessionListView: View {
                 if let first = store.orderedConnections.first {
                     Button(tr("New Group…")) { ask(.newGroup(first.id, [])) }
                 }
+                Button(tr("Group Order…")) { orderingGroups = true }
+                    .disabled(store.orderedConnections.allSatisfy { $0.groupNames.isEmpty } && org.groupOrder.isEmpty)
             } label: {
                 Label(tr("Show and Sort"), systemImage: org.filter == .recent && org.sort == .updated
                       ? "line.3.horizontal.decrease.circle" : "line.3.horizontal.decrease.circle.fill")
@@ -121,7 +128,10 @@ struct SessionListView: View {
                     tree(n, conn: p.conn, serverTag: serverTag(p.conn))
                 }
             } header: {
-                SectionTitle(icon: "pin.fill", title: tr("Pinned"), count: merged.pinned.count)
+                SectionTitle(icon: "pin.fill", title: tr("Pinned"), count: merged.pinned.count,
+                             expanded: !org.pinnedCollapsed) {
+                    withAnimation(.easeOut(duration: 0.15)) { org.pinnedCollapsed.toggle() }
+                }
             }
         }
         ForEach(merged.groups) { g in
@@ -133,7 +143,9 @@ struct SessionListView: View {
                     tree(p.node, conn: p.conn, serverTag: serverTag(p.conn))
                 }
             } header: {
-                SectionTitle(icon: "folder", title: g.name, count: g.items.count) {
+                SectionTitle(icon: "folder", title: g.name, count: g.items.count, expanded: !g.collapsed) {
+                    withAnimation(.easeOut(duration: 0.15)) { org.toggleCollapsed(g.name) }
+                } menu: {
                     groupMenu(g, merged)
                 }
             }
@@ -157,6 +169,7 @@ struct SessionListView: View {
             .disabled(i == 0)
         Button { reorderGroups(order, g.name, to: i + 1) } label: { Label(tr("Move Down"), systemImage: "arrow.down") }
             .disabled(i >= order.count - 1)
+        Button { orderingGroups = true } label: { Label(tr("Group Order…"), systemImage: "arrow.up.arrow.down") }
         Divider()
         Button { ask(.newGroup(any, [])) } label: { Label(tr("New Group…"), systemImage: "folder.badge.plus") }
         Button(role: .destructive) { dissolveEverywhere(g.name) } label: { Label(tr("Ungroup"), systemImage: "folder.badge.minus") }
@@ -170,8 +183,8 @@ struct SessionListView: View {
         let all = store.orderedConnections.map(\.id)
         let hiddenMirrors = org.showMirrors ? [] : mirrors.hidden(on: conn.id)
         // Search shows matches even in folded servers, without unfolding them.
-        Section(isExpanded: Binding(get: { section.flat != nil && searching ? true : !org.isServerCollapsed(conn.id) },
-                                    set: { org.setServerCollapsed(conn.id, !$0) })) {
+        let expanded = section.flat != nil && searching ? true : !org.isServerCollapsed(conn.id)
+        Section(isExpanded: Binding(get: { expanded }, set: { org.setServerCollapsed(conn.id, !$0) })) {
             if let flat = section.flat {
                 if flat.isEmpty {
                     EmptyLine(text: searching ? tr("No matches") : tr("No archived sessions"))
@@ -196,9 +209,12 @@ struct SessionListView: View {
                         .font(theme.font(.caption))
                         .foregroundStyle(theme.c.textFaint)
                 }
+                .compactRow()
             }
         } header: {
-            ServerSectionHeader(conn: conn, hidden: hiddenMirrors) {
+            ServerSectionHeader(conn: conn, hidden: hiddenMirrors, expanded: expanded, onToggle: {
+                withAnimation(.easeOut(duration: 0.15)) { org.setServerCollapsed(conn.id, expanded) }
+            }) {
                 Button { conn.reconnect() } label: { Label(tr("Reconnect"), systemImage: "arrow.clockwise") }
                 Button { ask(.newGroup(conn.id, [])) } label: { Label(tr("New Group…"), systemImage: "folder.badge.plus") }
                 if all.count > 1 {
@@ -244,6 +260,7 @@ struct SessionListView: View {
                     .tint(theme.c.textMuted)
                 }
                 .contextMenu { sessionMenu(n, conn) }
+                .compactRow()
                 .task(id: expanded && (n.session.subagentCount ?? 0) > 0 ? "\(n.session.id)|\(n.session.updatedAt.timeIntervalSince1970)" : "") {
                     guard expanded, (n.session.subagentCount ?? 0) > 0 else { return }
                     await conn.loadSubagents(n.session.id)
@@ -259,6 +276,7 @@ struct SessionListView: View {
                     .contextMenu {
                         Button { copy(a.id) } label: { Label(tr("Copy Subagent ID"), systemImage: "doc.on.doc") }
                     }
+                    .compactRow()
                 }
                 if canToggle {
                     Button {
@@ -269,14 +287,16 @@ struct SessionListView: View {
                              : tr("Show only the latest \(SidebarBuilder.agentPreview)"))
                             .font(theme.font(.caption))
                             .foregroundStyle(theme.c.focus)
-                            .padding(.leading, SessionListRow.indent(depth + 1) + 30)
+                            .padding(.leading, SessionListRow.indent(depth + 1) + 26)
                     }
+                    .compactRow()
                 }
                 if allAgents.isEmpty && n.children.isEmpty {
                     Text(conn.supportsSubagents ? tr("Loading subagents…") : tr("This server can't list subagents"))
                         .font(theme.font(.caption))
                         .foregroundStyle(theme.c.textFaint)
-                        .padding(.leading, SessionListRow.indent(depth + 1) + 30)
+                        .padding(.leading, SessionListRow.indent(depth + 1) + 26)
+                        .compactRow()
                 }
             }
         })
@@ -345,10 +365,13 @@ struct SessionListView: View {
                             }
                         }
                         .padding(.vertical, 2)
+                        .compactRow()
                     }
                 }
             } header: {
-                SectionTitle(icon: "chart.bar.xaxis", title: tr("Plan Usage"), count: nil)
+                SectionTitle(icon: "chart.bar.xaxis", title: tr("Plan Usage"), count: nil, expanded: !usageCollapsed) {
+                    withAnimation(.easeOut(duration: 0.15)) { usageCollapsed.toggle() }
+                }
             }
         }
     }

@@ -34,7 +34,7 @@ import { event, Subscriber, type Event, type Sink } from './log.js';
 import { preview, toEntries, type Entry, type RawMessage } from './normalize.js';
 import { isUnder, mainCheckout, tempRoots } from './recent.js';
 import { checkImages, readPlanUsage, Session, type ImageInput, type BackgroundTask, type PlanUsage, type SessionHost, type SettingsUpdate } from './session.js';
-import type { Store } from './store.js';
+import { LAYOUT_FIELDS, type Layout, type LayoutStamps, type Store } from './store.js';
 
 export const EFFORT_LEVELS = ['low', 'medium', 'high', 'xhigh', 'max'];
 export const PERMISSION_MODES = ['default', 'acceptEdits', 'plan', 'auto', 'dontAsk', 'bypassPermissions'];
@@ -46,6 +46,14 @@ const FALLBACK_MODELS = [
   { value: 'sonnet', displayName: 'Sonnet', description: '' },
   { value: 'haiku', displayName: 'Haiku', description: '' },
 ];
+
+/** PUT /layout: any of the fields, each with the time it was changed. */
+export interface LayoutUpdate {
+  pinned?: string[];
+  archived?: string[];
+  groupOrder?: string[];
+  at?: Partial<LayoutStamps>;
+}
 
 export interface CreateRequest {
   cwd: string;
@@ -499,6 +507,40 @@ export class Manager implements SessionHost, SessionToolHost {
     return this.usage;
   }
 
+  // ------------------------------------------------------------ layout
+
+  /** Pinned, archived and group order, as clients last set them. */
+  layout(): Layout {
+    return this.store.layout();
+  }
+
+  /**
+   * Sets the given fields. Each carries the time the client changed it
+   * (`at`, its clock, ms; now when left out): a field older than the one
+   * stored is ignored, so a client that was offline can't undo newer changes.
+   */
+  updateLayout(req: LayoutUpdate): Layout {
+    const l = this.store.layout();
+    let changed = false;
+    for (const f of LAYOUT_FIELDS) {
+      const v = req[f];
+      if (v === undefined) continue;
+      if (!Array.isArray(v) || v.length > 10_000 || v.some((x) => typeof x !== 'string' || x.length > 500)) {
+        throw new HttpError(400, T('layoutInvalid', { field: f }));
+      }
+      const at = typeof req.at?.[f] === 'number' && Number.isFinite(req.at[f]) ? req.at[f] : Date.now();
+      if (at < l.at[f]) continue;
+      l[f] = [...new Set(v)];
+      l.at[f] = at;
+      changed = true;
+    }
+    if (changed) {
+      this.store.setLayout(l);
+      this.broadcastGlobal(event('layout', { layout: l }));
+    }
+    return l;
+  }
+
   /**
    * Through any live process; with none, a short-lived one that only starts
    * up and answers (no prompt, no model call).
@@ -826,6 +868,7 @@ export class Manager implements SessionHost, SessionToolHost {
   subscribeGlobal(sink: Sink, lang: Lang = DEFAULT_LANG): Subscriber {
     const sub: Subscriber = new Subscriber(sink, () => this.global.delete(sub), lang);
     sub.send(event('sessions', { sessions: this.summaries() }));
+    sub.send(event('layout', { layout: this.store.layout() }));
     this.global.add(sub);
     return sub;
   }

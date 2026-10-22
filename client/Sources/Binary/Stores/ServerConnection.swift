@@ -35,6 +35,11 @@ final class ServerConnection: Identifiable {
 
     /// Called when a session's state changes, for notifications.
     @ObservationIgnored var onTransition: ((ServerConnection, SessionSummary?, SessionSummary) -> Void)?
+    /// Pinned, archived and group order as the server keeps them; nil until it
+    /// sends them (older servers never do).
+    @ObservationIgnored private(set) var layout: SharedLayout?
+    /// Called with the server's layout on connecting and whenever it changes.
+    @ObservationIgnored var onLayout: ((ServerConnection, SharedLayout) -> Void)?
 
     @ObservationIgnored private var task: Task<Void, Never>?
 
@@ -128,6 +133,9 @@ final class ServerConnection: Identifiable {
         case "usage":
             struct UsageEvent: Decodable { var usage: PlanUsage }
             if let ev = try? dec.decode(UsageEvent.self, from: data) { usage = ev.usage }
+        case "layout":
+            struct LayoutEvent: Decodable { var layout: SharedLayout }
+            if let ev = try? dec.decode(LayoutEvent.self, from: data) { received(ev.layout) }
         case "removed":
             guard let ev = try? dec.decode(RemovedEvent.self, from: data) else { return }
             sessions[ev.id] = nil
@@ -146,6 +154,18 @@ final class ServerConnection: Identifiable {
         if old?.state != s.state || old?.pending != s.pending {
             onTransition?(self, old, s)
         }
+    }
+
+    private func received(_ l: SharedLayout) {
+        layout = l
+        onLayout?(self, l)
+    }
+
+    /// Sends layout changes made here (PUT /layout).
+    func sendLayout(_ u: LayoutUpdate) async {
+        struct R: Decodable { var layout: SharedLayout }
+        guard let r: R = try? await requireAPI().send("PUT", "/layout", body: u), r.layout != layout else { return }
+        received(r.layout)
     }
 
     var pendingCount: Int { sessions.values.reduce(0) { $0 + $1.pending } }

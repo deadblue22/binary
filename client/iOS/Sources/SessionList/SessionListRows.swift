@@ -1,8 +1,9 @@
 import SwiftUI
 
-/// One session in the list: status, title and time, then what it's doing (or
-/// its project) on a second line. Rows with child sessions or subagents have
-/// a count at the end that shows them nested below.
+/// One session in the list, on one line: status, title, time. What it's
+/// doing shows on a second line only while it works, waits or failed. Rows
+/// with child sessions or subagents have a count at the end that shows them
+/// nested below.
 struct SessionListRow: View {
     let node: SidebarNode
     let depth: Int
@@ -17,7 +18,7 @@ struct SessionListRow: View {
     @Environment(\.theme) private var theme
 
     /// Leading inset of a row nested `depth` levels down.
-    static func indent(_ depth: Int) -> CGFloat { CGFloat(depth) * 18 }
+    static func indent(_ depth: Int) -> CGFloat { CGFloat(depth) * 16 }
 
     private var s: SessionSummary { node.session }
     /// Approvals waiting here, plus in nested sessions while they're hidden.
@@ -25,71 +26,68 @@ struct SessionListRow: View {
     private var subtasks: Int { node.children.count + (s.subagentCount ?? 0) }
 
     var body: some View {
-        HStack(spacing: 8) {
+        HStack(spacing: 6) {
             Button(action: onOpen) {
-                HStack(alignment: .center, spacing: 10) {
+                HStack(alignment: .firstTextBaseline, spacing: 8) {
                     if depth > 0 {
                         Image(systemName: "arrow.turn.down.right")
-                            .font(.system(size: theme.size(.caption)))
+                            .font(.system(size: theme.size(.small)))
                             .foregroundStyle(theme.c.textFaint)
                     }
                     StatusDot(state: s.shownState, live: s.live)
-                    VStack(alignment: .leading, spacing: 3) {
-                        HStack(alignment: .firstTextBaseline, spacing: 6) {
+                        .alignmentGuide(.firstTextBaseline) { $0[VerticalAlignment.center] + 4 }
+                    VStack(alignment: .leading, spacing: 1) {
+                        HStack(alignment: .firstTextBaseline, spacing: 5) {
                             Text(s.title)
                                 .font(theme.font(.body).weight(pending > 0 ? .semibold : .regular))
                                 .foregroundStyle(theme.c.text)
                                 .lineLimit(1)
-                            Spacer(minLength: 4)
-                            Text(Format.relative(s.updatedAt))
-                                .font(theme.font(.caption))
-                                .foregroundStyle(theme.c.textFaint)
-                                .fixedSize()
-                        }
-                        HStack(spacing: 5) {
-                            if node.pinned { Image(systemName: "pin.fill").foregroundStyle(theme.c.textFaint) }
-                            if node.archived { Image(systemName: "archivebox").foregroundStyle(theme.c.textFaint) }
-                            if viewOnly {
-                                Image(systemName: s.sshHost == nil ? "eye" : "network").foregroundStyle(theme.c.textFaint)
-                            }
-                            Text(detail)
-                                .foregroundStyle(detailColor)
-                                .lineLimit(1)
+                            if node.pinned { marker("pin.fill") }
+                            if node.archived { marker("archivebox") }
+                            if viewOnly { marker(s.sshHost == nil ? "eye" : "network") }
                             Spacer(minLength: 4)
                             if let serverTag {
                                 Text(serverTag)
                                     .font(theme.font(.small))
                                     .foregroundStyle(theme.c.textFaint)
                                     .lineLimit(1)
-                                    .padding(.horizontal, 5)
-                                    .padding(.vertical, 1)
+                                    .padding(.horizontal, 4)
                                     .overlay(Capsule().strokeBorder(theme.c.border))
                                     .fixedSize()
                             }
+                            Text(Format.relative(s.updatedAt))
+                                .font(theme.font(.caption))
+                                .foregroundStyle(theme.c.textFaint)
+                                .fixedSize()
                             if pending > 0 {
                                 CountBadge(count: pending, tint: theme.c.warning)
                             }
                         }
-                        .font(theme.font(.caption))
+                        if let detail {
+                            Text(detail)
+                                .font(theme.font(.caption))
+                                .foregroundStyle(detailColor)
+                                .lineLimit(1)
+                        }
                     }
                 }
-                .padding(.vertical, 3)
                 .contentShape(Rectangle())
             }
             .buttonStyle(RowButtonStyle())
             if expandable {
                 Button(action: onToggle) {
-                    HStack(spacing: 3) {
+                    HStack(spacing: 2) {
                         if subtasks > 0 { Text("\(subtasks)").monospacedDigit() }
                         Image(systemName: expanded ? "chevron.up" : "chevron.down")
-                            .font(.system(size: theme.size(.small), weight: .semibold))
+                            .font(.system(size: theme.size(.small) - 1, weight: .semibold))
                     }
-                    .font(theme.font(.caption).weight(.medium))
+                    .font(theme.font(.small).weight(.medium))
                     .foregroundStyle(expanded ? theme.c.focus : theme.c.textMuted)
-                    .padding(.horizontal, 8)
-                    .padding(.vertical, 5)
+                    .padding(.horizontal, 6)
+                    .padding(.vertical, 3)
                     .background(Capsule().fill(expanded ? theme.c.focus.opacity(0.14) : theme.c.surfaceAlt))
-                    .contentShape(Capsule())
+                    .padding(.vertical, 4)
+                    .contentShape(Rectangle())
                 }
                 .buttonStyle(.borderless)
                 .accessibilityLabel(expanded ? tr("Collapse") : tr("Show subtasks"))
@@ -99,15 +97,21 @@ struct SessionListRow: View {
         .accessibilityElement(children: .contain)
     }
 
-    /// What it's doing when busy, the error when it failed, else where it is.
-    private var detail: String {
+    private func marker(_ icon: String) -> some View {
+        Image(systemName: icon)
+            .font(.system(size: theme.size(.small)))
+            .foregroundStyle(theme.c.textFaint)
+    }
+
+    /// What it's doing while it works or waits, or why it failed.
+    private var detail: String? {
         if let x = s.hold, x.working { return s.statusText }
-        if s.status.isBusy, let a = s.activity, !a.isEmpty { return a }
-        if s.status.isBusy { return s.status.label }
-        if s.status == .error, let e = s.error, !e.isEmpty { return e }
-        let place = s.project.isEmpty ? (s.cwd as NSString).lastPathComponent : s.project
-        if let b = s.gitBranch, !b.isEmpty, b != "HEAD", s.worktree != nil { return place + " · " + b }
-        return place
+        if s.status.isBusy {
+            if let a = s.activity, !a.isEmpty { return a }
+            return s.status.label
+        }
+        if s.status == .error { return s.error.flatMap { $0.isEmpty ? nil : $0 } ?? s.status.label }
+        return nil
     }
 
     private var detailColor: Color {
@@ -130,11 +134,11 @@ struct SubagentListRow: View {
 
     var body: some View {
         Button(action: onOpen) {
-            HStack(spacing: 10) {
+            HStack(spacing: 8) {
                 Image(systemName: "arrow.turn.down.right")
-                    .font(.system(size: theme.size(.caption)))
+                    .font(.system(size: theme.size(.small)))
                     .foregroundStyle(theme.c.textFaint)
-                IconTile(icon: "person.2.fill", tint: theme.c.external, size: 20)
+                IconTile(icon: "person.2.fill", tint: theme.c.external, size: 18)
                 Text(info.title.flatMap { $0.isEmpty ? nil : $0 } ?? "Subagent")
                     .font(theme.font(.callout))
                     .foregroundStyle(theme.c.text)
@@ -147,7 +151,6 @@ struct SubagentListRow: View {
                         .fixedSize()
                 }
             }
-            .padding(.vertical, 2)
             .contentShape(Rectangle())
         }
         .buttonStyle(RowButtonStyle())
@@ -162,44 +165,96 @@ struct RowButtonStyle: ButtonStyle {
     }
 }
 
-/// A server's section header: connection state, name, pending approvals.
+extension View {
+    /// Tight rows on the list's own background, like the Mac sidebar.
+    func compactRow() -> some View {
+        listRowInsets(EdgeInsets(top: 5, leading: 12, bottom: 5, trailing: 8))
+            .listRowBackground(Color.clear)
+            .listRowSeparator(.hidden)
+    }
+}
+
+/// A section header that folds its section: chevron, title, then whatever
+/// `trailing` adds (counts, a menu).
+struct FoldHeader<Title: View, Trailing: View>: View {
+    let expanded: Bool
+    let onToggle: () -> Void
+    @ViewBuilder let title: () -> Title
+    @ViewBuilder var trailing: () -> Trailing
+    @Environment(\.theme) private var theme
+
+    var body: some View {
+        HStack(spacing: 6) {
+            Button(action: onToggle) {
+                HStack(spacing: 6) {
+                    Chevron(expanded: expanded)
+                        .frame(width: 12)
+                    title()
+                    Spacer(minLength: 4)
+                }
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            trailing()
+        }
+        .font(theme.font(.caption).weight(.semibold))
+        .foregroundStyle(theme.c.textMuted)
+        .textCase(nil)
+        .listRowInsets(EdgeInsets(top: 6, leading: 12, bottom: 2, trailing: 8))
+    }
+}
+
+/// The "…" at the end of a header.
+struct HeaderMenu<Content: View>: View {
+    @ViewBuilder let content: () -> Content
+    @Environment(\.theme) private var theme
+
+    var body: some View {
+        Menu(content: content) {
+            Image(systemName: "ellipsis")
+                .font(.system(size: theme.size(.callout), weight: .semibold))
+                .foregroundStyle(theme.c.textMuted)
+                .frame(width: 30, height: 22)
+                .contentShape(Rectangle())
+        }
+    }
+}
+
+/// A server's section header: connection state, name, session count,
+/// pending approvals, and its menu.
 struct ServerSectionHeader<MenuContent: View>: View {
     let conn: ServerConnection
     /// Mirror copies hidden on this server; left out of the count.
     var hidden: Set<String> = []
+    let expanded: Bool
+    let onToggle: () -> Void
     @ViewBuilder let menu: () -> MenuContent
     @Environment(\.theme) private var theme
 
     var body: some View {
-        HStack(spacing: 7) {
+        FoldHeader(expanded: expanded, onToggle: onToggle) {
             Circle()
                 .fill(color)
-                .frame(width: 8, height: 8)
+                .frame(width: 7, height: 7)
             Text(conn.displayName)
-                .font(theme.font(.headline))
-                .foregroundStyle(theme.c.text)
                 .lineLimit(1)
             if case .offline(let msg) = conn.status {
                 Text(msg)
-                    .font(theme.font(.caption))
+                    .fontWeight(.regular)
                     .foregroundStyle(theme.c.textFaint)
                     .lineLimit(1)
             } else {
                 Text("\(conn.sessions.count - hidden.count)")
-                    .font(theme.font(.caption).monospacedDigit())
+                    .fontWeight(.regular)
+                    .monospacedDigit()
                     .foregroundStyle(theme.c.textFaint)
             }
-            Spacer(minLength: 4)
+        } trailing: {
             if conn.pendingCount > 0 {
                 Chip(text: tr("\(conn.pendingCount) pending"), icon: "hand.raised.fill", tint: theme.c.warning)
             }
-            Menu(content: menu) {
-                Image(systemName: "ellipsis.circle")
-                    .font(.system(size: theme.size(.body)))
-                    .foregroundStyle(theme.c.textMuted)
-            }
+            HeaderMenu(content: menu)
         }
-        .textCase(nil)
     }
 
     private var color: Color {
@@ -216,39 +271,34 @@ struct SectionTitle<MenuContent: View>: View {
     let icon: String
     let title: String
     let count: Int?
+    let expanded: Bool
+    let onToggle: () -> Void
     @ViewBuilder var menu: () -> MenuContent
     @Environment(\.theme) private var theme
 
     var body: some View {
-        HStack(spacing: 6) {
+        FoldHeader(expanded: expanded, onToggle: onToggle) {
             Image(systemName: icon)
-                .font(.system(size: theme.size(.caption)))
-                .foregroundStyle(theme.c.textMuted)
+                .font(.system(size: theme.size(.small)))
             Text(title)
-                .font(theme.font(.headline))
-                .foregroundStyle(theme.c.text)
                 .lineLimit(1)
             if let count {
                 Text("\(count)")
-                    .font(theme.font(.caption).monospacedDigit())
+                    .fontWeight(.regular)
+                    .monospacedDigit()
                     .foregroundStyle(theme.c.textFaint)
             }
-            Spacer(minLength: 4)
+        } trailing: {
             if MenuContent.self != EmptyView.self {
-                Menu(content: menu) {
-                    Image(systemName: "ellipsis.circle")
-                        .font(.system(size: theme.size(.body)))
-                        .foregroundStyle(theme.c.textMuted)
-                }
+                HeaderMenu(content: menu)
             }
         }
-        .textCase(nil)
     }
 }
 
 extension SectionTitle where MenuContent == EmptyView {
-    init(icon: String, title: String, count: Int?) {
-        self.init(icon: icon, title: title, count: count) { EmptyView() }
+    init(icon: String, title: String, count: Int?, expanded: Bool, onToggle: @escaping () -> Void) {
+        self.init(icon: icon, title: title, count: count, expanded: expanded, onToggle: onToggle) { EmptyView() }
     }
 }
 
@@ -260,6 +310,45 @@ struct EmptyLine: View {
         Text(text)
             .font(theme.font(.caption))
             .foregroundStyle(theme.c.textFaint)
+            .compactRow()
+    }
+}
+
+/// Drag groups into the order every client shows them in.
+struct GroupOrderSheet: View {
+    @Environment(SessionOrganizer.self) private var org
+    @Environment(ServerStore.self) private var store
+    @Environment(\.dismiss) private var dismiss
+    @Environment(\.theme) private var theme
+    @State private var order: [String] = []
+
+    var body: some View {
+        NavigationStack {
+            List {
+                ForEach(order, id: \.self) { g in
+                    Label(g, systemImage: "folder")
+                        .foregroundStyle(theme.c.text)
+                }
+                .onMove { order.move(fromOffsets: $0, toOffset: $1) }
+            }
+            .environment(\.editMode, .constant(.active))
+            .navigationTitle(tr("Group Order"))
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button(tr("Cancel")) { dismiss() }
+                }
+                ToolbarItem(placement: .confirmationAction) {
+                    Button(tr("Done")) {
+                        org.setGroupOrder(order + org.groupOrder.filter { !order.contains($0) })
+                        dismiss()
+                    }
+                }
+            }
+            .onAppear {
+                order = org.orderedGroups(inUse: store.orderedConnections.reduce(into: Set<String>()) { $0.formUnion($1.groupNames) })
+            }
+        }
     }
 }
 
