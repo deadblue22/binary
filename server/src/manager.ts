@@ -862,12 +862,17 @@ export class Manager implements SessionHost, SessionToolHost {
 
   /**
    * The folder a session runs in: Binary's own record; else the folder the
-   * desktop app starts it in (the session may have cd'd into a worktree that
-   * is gone since, which is what Claude Code reports as its cwd); else that.
+   * claude process holding it elsewhere was started in (the transcript's
+   * first cwd can be another machine's, for a session moved here); else the
+   * folder the desktop app starts it in (the session may have cd'd into a
+   * worktree that is gone since, which is what Claude Code reports as its
+   * cwd); else that.
    */
   cwdFor(id: string): string {
     const rec = this.store.get(id);
     if (rec?.cwd) return rec.cwd;
+    const held = this.agents.get(id)?.cwd;
+    if (held && this.dirExists(held)) return held;
     const desk = this.desktop.cwdOf(id);
     if (desk && this.dirExists(desk)) return desk;
     return this.infos.get(id)?.cwd || '';

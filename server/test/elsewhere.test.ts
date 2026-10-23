@@ -130,3 +130,24 @@ test('turns taken elsewhere make Binary restart its own process before sending',
     await h.close();
   }
 });
+
+test("a session moved from another machine runs in the folder its holder started it in", async () => {
+  const id = randomUUID();
+  const h = await harness();
+  try {
+    // Begun elsewhere: the transcript's first cwd doesn't exist here.
+    const away = join(h.root, 'other-machine', 'bot');
+    writeTranscript(h.configDir, h.cwd, id, [transcriptLine(id, away, randomUUID(), null, 'user', 'hi')]);
+    await h.manager.refreshList();
+    assert.equal(h.manager.summary(id)?.cwdExists, false, 'without a holder it looks gone');
+
+    h.setAgents([{ pid: 1, cwd: h.cwd, kind: 'interactive', sessionId: id, status: 'idle' }]);
+    await h.manager.refreshAgents();
+    const sum = h.manager.summary(id)!;
+    assert.equal(sum.cwd, h.cwd);
+    assert.equal(sum.cwdExists, true);
+    assert.equal(h.manager.cannotRun(id), undefined);
+  } finally {
+    await h.close();
+  }
+});
