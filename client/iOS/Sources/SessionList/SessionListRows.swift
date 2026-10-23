@@ -146,10 +146,22 @@ struct SessionListRow: View {
         }
     }
 
-    /// Folder and branch.
+    /// Folder and branch, readable: a worktree under `<repo>/.claude/worktrees`
+    /// shows its repository instead of its generated name and leaves out the
+    /// branch made for it (`claude/<name>`); other generated names drop their
+    /// hash.
     private var place: String {
-        let folder = s.project.isEmpty ? (s.cwd as NSString).lastPathComponent : s.project
-        guard let b = s.gitBranch, !b.isEmpty, b != "HEAD" else { return folder }
+        var folder = s.project.isEmpty ? (s.cwd as NSString).lastPathComponent : s.project
+        var worktree: String?
+        if let r = s.cwd.range(of: "/.claude/worktrees/") {
+            worktree = String(s.cwd[r.upperBound...].prefix { $0 != "/" })
+            folder = (String(s.cwd[..<r.lowerBound]) as NSString).lastPathComponent
+        } else if let r = folder.range(of: #"-(?=[0-9a-f]*[0-9])[0-9a-f]{6}$"#, options: .regularExpression) {
+            // Generated folders like scratch-2026-10-10-35992a lose the hash.
+            folder.removeSubrange(r)
+        }
+        guard let b = s.gitBranch, !b.isEmpty, b != "HEAD",
+              !(worktree.map { !$0.isEmpty && b.hasSuffix($0) } ?? false) else { return folder }
         return folder + " · " + b
     }
 
