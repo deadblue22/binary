@@ -34,6 +34,9 @@ import AppKit
 ///   BINARY_PREVIEW=<path>          with BINARY_SELECT: preview that file (relative to its folder)
 ///   BINARY_MOVE=<id>=<group>       move a session into a group (PATCH tag) after 2 s
 ///   BINARY_TIMING=1                print how long opening a session takes
+///   BINARY_SCROLL_BENCH=<pages>    load that many older pages, show every row, then scroll
+///                                  the transcript and print the time each step takes
+///   BINARY_SCROLL_BENCH_RANGE=<pt> with BINARY_SCROLL_BENCH: scroll only that far from the end
 ///   BINARY_LOG=1                   trace sidebar reveal and redirect steps on stderr
 /// A text dump of client state (servers, menus, scroll views) is written next
 /// to the snapshot as <file.png>.txt.
@@ -51,6 +54,8 @@ enum DebugHooks {
         guard env["BINARY_LOG"] == "1" else { return }
         FileHandle.standardError.write(Data("log \(what())\n".utf8))
     }
+
+    static func err(_ s: String) { FileHandle.standardError.write(Data((s + "\n").utf8)) }
 
     static func mark(_ what: String) {
         guard timing, let t = openStarted else { return }
@@ -123,6 +128,64 @@ enum DebugHooks {
                 NSApp.terminate(nil)
                 // An open popover or sheet can refuse a normal quit; this is a test run.
                 DispatchQueue.main.asyncAfter(deadline: .now() + 1) { exit(0) }
+            }
+        }
+    }
+
+    /// BINARY_SCROLL_BENCH: scrolls the tallest scroll view of the main window
+    /// 40 pt per 120 Hz tick, to the top and back (or within
+    /// BINARY_SCROLL_BENCH_RANGE of the end, three times), and prints the main
+    /// thread's CPU time per step: scrolling, layout and display.
+    static func scrollBench() {
+        func scrollViews(_ v: NSView) -> [NSScrollView] {
+            ((v as? NSScrollView).map { [$0] } ?? []) + v.subviews.flatMap(scrollViews)
+        }
+        guard let root = NSApp.windows.first(where: { $0.isVisible && $0.contentView != nil })?.contentView,
+              let sv = scrollViews(root).max(by: { ($0.documentView?.frame.height ?? 0) < ($1.documentView?.frame.height ?? 0) }),
+              let doc = sv.documentView else { return err("bench: no scroll view") }
+        let maxY = doc.frame.height - sv.contentView.bounds.height
+        let flipped = doc.isFlipped
+        let range = Double(env["BINARY_SCROLL_BENCH_RANGE"] ?? "").map { CGFloat($0) }
+        let lo: CGFloat = range.map { flipped ? max(0, maxY - $0) : 0 } ?? 0
+        let hi: CGFloat = range.map { flipped ? maxY : min(maxY, $0) } ?? maxY
+        var laps = range == nil ? 1 : 3
+        var y = flipped ? maxY : 0
+        var up = true
+        var work: [Double] = []
+        func cpu() -> Double { Double(clock_gettime_nsec_np(CLOCK_THREAD_CPUTIME_ID)) / 1e6 }
+        var views = 0
+        func count(_ v: NSView) { views += 1; v.subviews.forEach(count) }
+        count(doc)
+        err("bench: content \(Int(doc.frame.height))pt, \(views) views")
+        Timer.scheduledTimer(withTimeInterval: 1.0 / 120, repeats: true) { t in
+            MainActor.assumeIsolated {
+                let toward: CGFloat = flipped == up ? -40 : 40
+                y += toward
+                if y < lo || y > hi {
+                    y = min(max(y, lo), hi)
+                    if up {
+                        up = false
+                    } else {
+                        laps -= 1
+                        up = true
+                    }
+                    if laps == 0 {
+                        t.invalidate()
+                        let w = work.sorted()
+                        err(String(format: "bench: %d steps, ms per step avg %.2f p50 %.2f p95 %.2f max %.1f, over 8 ms %d",
+                                   w.count, w.reduce(0, +) / Double(w.count), w[w.count / 2], w[w.count * 95 / 100],
+                                   w.last ?? 0, w.filter { $0 > 8 }.count))
+                        if env["BINARY_SNAPSHOT_QUIT"] == "1" { exit(0) }
+                        return
+                    }
+                }
+                let t0 = cpu()
+                sv.contentView.scroll(to: NSPoint(x: 0, y: y))
+                sv.reflectScrolledClipView(sv.contentView)
+                sv.window?.layoutIfNeeded()
+                sv.window?.displayIfNeeded()
+                CATransaction.flush()
+                work.append(cpu() - t0)
             }
         }
     }

@@ -13,6 +13,13 @@ struct TranscriptView<Source: TranscriptSource>: View {
     /// Rows rendered, counted from the end. Opening a session at the bottom
     /// makes the list lay out every row above, so start with the latest few.
     @State private var window = TranscriptWindow.initial
+    /// Bumped when row heights change everywhere (width, theme), so chunks
+    /// drawn as placeholders measure their rows again.
+    @State private var measureGeneration = 0
+    @State private var measuredFor: MeasureKey?
+    /// Which rows' disclosures are open, kept here since rows far from view
+    /// are dropped and built again.
+    @State private var expansion = ExpansionStore()
 
     private var rowGap: CGFloat { 16 * min(theme.scale, 1.2) }
 
@@ -22,11 +29,16 @@ struct TranscriptView<Source: TranscriptSource>: View {
     }
 
     @ViewBuilder
-    private func rowsView(_ rows: [TranscriptItem], busy: Bool) -> some View {
-        ForEach(Array(rows.enumerated()), id: \.element.id) { i, item in
-            TranscriptRow(item: item, busy: busy, cwd: source.cwd)
-                .padding(.top, i == 0 ? 0 : gap(rows[i - 1], item))
-                .id(item.id)
+    private func rowsView(_ rows: [TranscriptItem], busy: Bool, viewport: CGFloat) -> some View {
+        ForEach(TranscriptChunks.split(rows)) { chunk in
+            TranscriptChunk(viewport: viewport, generation: measureGeneration) {
+                ForEach(chunk.range, id: \.self) { i in
+                    TranscriptRow(item: rows[i], busy: busy, cwd: source.cwd)
+                        .padding(.top, i == 0 ? 0 : gap(rows[i - 1], rows[i]))
+                        .id(rows[i].id)
+                        .environment(\.rowExpansion, RowExpansion(store: expansion, row: rows[i].id))
+                }
+            }
         }
     }
 
@@ -73,7 +85,7 @@ struct TranscriptView<Source: TranscriptSource>: View {
                             .frame(maxWidth: .infinity)
                             .padding(.top, 60)
                         }
-                        rowsView(Array(shown), busy: busy)
+                        rowsView(Array(shown), busy: busy, viewport: geo.size.height)
                         if let p = source.partial {
                             PartialView(partial: p)
                                 .padding(.top, rowGap)
@@ -150,6 +162,28 @@ struct TranscriptView<Source: TranscriptSource>: View {
                     if atBottom { proxy.scrollTo("bottom", anchor: .bottom) }
                 }
                 .onChange(of: theme) { _, _ in scrollToBottom(proxy, delayed: true) }
+                // Rows drawn as placeholders keep their old height through a resize;
+                // measure them again once it settles.
+                .task(id: MeasureKey(width: geo.size.width, theme: theme)) {
+                    let key = MeasureKey(width: geo.size.width, theme: theme)
+                    guard let old = measuredFor else { measuredFor = key; return }
+                    guard old != key else { return }
+                    try? await Task.sleep(nanoseconds: 300_000_000)
+                    guard !Task.isCancelled else { return }
+                    measuredFor = key
+                    measureGeneration += 1
+                }
+                #if os(macOS)
+                .task {
+                    guard let pages = Int(DebugHooks.env["BINARY_SCROLL_BENCH"] ?? "") else { return }
+                    try? await Task.sleep(nanoseconds: 2_500_000_000)
+                    for _ in 0..<pages { await source.loadOlder() }
+                    window = source.items.count
+                    DebugHooks.err("bench: \(source.items.count) rows")
+                    try? await Task.sleep(nanoseconds: 3_000_000_000)
+                    DebugHooks.scrollBench()
+                }
+                #endif
             }
         }
     }
@@ -207,7 +241,7 @@ struct UserMessageView: View {
     let imageKeys: [String?]
     var time: String? = nil
     @Environment(\.theme) private var theme
-    @State private var expanded = false
+    @RowExpanded private var expanded = false
 
     init(text: String, imageKeys: [String?] = [], time: String? = nil) {
         self.raw = text
@@ -276,7 +310,7 @@ struct UserMessageView: View {
 struct ThinkingView: View {
     let text: String
     @Environment(\.theme) private var theme
-    @State private var expanded = false
+    @RowExpanded private var expanded = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
@@ -318,7 +352,7 @@ struct SystemRow: View {
     let isError: Bool
     var event: String? = nil
     @Environment(\.theme) private var theme
-    @State private var expanded = false
+    @RowExpanded private var expanded = false
 
     var body: some View {
         if subtype == "task_notification" {
@@ -397,7 +431,7 @@ struct TaskNotificationRow: View {
     /// Quieter look for desktop-app events.
     var dim = false
     @Environment(\.theme) private var theme
-    @State private var expanded = DebugHooks.expandTools
+    @RowExpanded private var expanded = DebugHooks.expandTools
     @State private var hover = false
 
     private var parts: (summary: String, body: String) {
@@ -570,6 +604,129 @@ private struct InitialAnchor: ViewModifier {
             content.defaultScrollAnchor(top ? .top : .bottom, for: .initialOffset)
         } else {
             content.defaultScrollAnchor(top ? .top : .bottom)
+        }
+    }
+}
+
+
+/// Groups of transcript rows. Boundaries depend only on the rows' ids, so a
+/// group keeps its identity (and measured height) as rows arrive at the end
+/// or older ones are loaded above.
+enum TranscriptChunks {
+    struct Chunk: Identifiable {
+        /// The first row's id.
+        var id: String
+        var range: Range<Int>
+    }
+
+    /// A group starts at about one row in `average`, and is cut after `maximum`.
+    static let average: UInt64 = 12
+    static let maximum = 24
+
+    static func split(_ rows: [TranscriptItem]) -> [Chunk] {
+        var out: [Chunk] = []
+        var start = 0
+        var sinceNatural = 0
+        for i in rows.indices where i > 0 {
+            sinceNatural += 1
+            if hash(rows[i].id) % average == 0 {
+                out.append(Chunk(id: rows[start].id, range: start..<i))
+                start = i
+                sinceNatural = 0
+            } else if sinceNatural % maximum == 0 {
+                out.append(Chunk(id: rows[start].id, range: start..<i))
+                start = i
+            }
+        }
+        if start < rows.count { out.append(Chunk(id: rows[start].id, range: start..<rows.count)) }
+        return out
+    }
+
+    /// FNV-1a, so boundaries don't move between launches like hashValue would.
+    private static func hash(_ s: String) -> UInt64 {
+        var h: UInt64 = 0xcbf29ce484222325
+        for b in s.utf8 { h = (h ^ UInt64(b)) &* 0x100000001b3 }
+        return h
+    }
+}
+
+/// A group of rows that is only built near the visible area; elsewhere it is
+/// empty space of the height it last measured. Scrolling costs SwiftUI work
+/// for every built row (eager and lazy stacks alike), so a long transcript
+/// stuttered once its history was loaded.
+private struct TranscriptChunk<Content: View>: View {
+    let viewport: CGFloat
+    /// Changes when the measured height no longer holds (width, theme).
+    let generation: Int
+    @ViewBuilder let content: () -> Content
+    @State private var height: CGFloat?
+    @State private var near = true
+
+    var body: some View {
+        Group {
+            if near || height == nil {
+                VStack(alignment: .leading, spacing: 0, content: content)
+                    .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { height = $0 }
+            } else {
+                Color.clear.frame(height: height)
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        // Built within a screen of the visible area and dropped beyond two,
+        // so scrolling back and forth at the edge doesn't rebuild rows.
+        .onGeometryChange(for: Int.self) { p in
+            let f = p.frame(in: .named("transcriptViewport"))
+            let screen = max(viewport, 400)
+            let distance = max(-f.maxY, f.minY - viewport, 0)
+            return distance < screen ? 0 : distance < 2 * screen ? 1 : 2
+        } action: { band in
+            if band == 0 { near = true } else if band == 2 { near = false }
+        }
+        .onChange(of: generation) { _, _ in height = nil }
+    }
+}
+
+private struct MeasureKey: Equatable {
+    var width: CGFloat
+    var theme: Theme
+}
+
+/// Open disclosures of transcript rows, by row id.
+@MainActor
+@Observable
+final class ExpansionStore {
+    var open: [String: Bool] = [:]
+}
+
+/// The disclosure state of the row a view is in.
+struct RowExpansion {
+    let store: ExpansionStore
+    let row: String
+}
+
+extension EnvironmentValues {
+    @Entry var rowExpansion: RowExpansion?
+}
+
+/// Whether a row's disclosure is open. Inside the transcript it is kept by
+/// the transcript, so it survives the row being dropped and built again;
+/// elsewhere (previews) by the view.
+@MainActor
+@propertyWrapper
+struct RowExpanded: DynamicProperty {
+    @Environment(\.rowExpansion) private var slot
+    @State private var local: Bool
+    private let initial: Bool
+
+    init(wrappedValue: Bool) {
+        _local = State(initialValue: wrappedValue)
+        initial = wrappedValue
+    }
+
+    var wrappedValue: Bool {
+        get { slot.map { $0.store.open[$0.row] ?? initial } ?? local }
+        nonmutating set {
+            if let slot { slot.store.open[slot.row] = newValue } else { local = newValue }
         }
     }
 }

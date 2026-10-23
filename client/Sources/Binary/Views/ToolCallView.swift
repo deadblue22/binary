@@ -8,7 +8,7 @@ struct ToolCallView: View {
     let cwd: String?
     @Environment(\.theme) private var theme
     @Environment(\.subagentOpener) private var opener
-    @State private var expanded = DebugHooks.expandTools
+    @RowExpanded private var expanded = DebugHooks.expandTools
     @State private var hover = false
 
     private var name: String { use.name ?? tr("Tool") }
