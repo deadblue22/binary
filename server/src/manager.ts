@@ -22,6 +22,7 @@ import {
   type PermissionMode,
   type SDKSessionInfo,
 } from '@anthropic-ai/claude-agent-sdk';
+import { lastMessageAt } from './activity.js';
 import { runningTasks } from './bgtasks.js';
 import { resumeNote, saveInterrupted, takeInterrupted, type Interrupted } from './restart.js';
 import { activeAgents, type ActiveAgent } from './claude.js';
@@ -295,6 +296,8 @@ export class Manager implements SessionHost, SessionToolHost {
   /** Which program holds each external claude process, by pid. */
   private holders = new Map<number, Holder>();
   /** For sessions busy elsewhere: whether the transcript shows the turn has ended. */
+  /** Last real message per session, read off the transcript when its stamp changes. */
+  private messageAt = new Map<string, { stamp: string; at: number }>();
   private turns = new Map<string, { stamp: string; ended: boolean; modified: number; tasks?: BackgroundTask[] }>();
   private lastTurnEnded = new Map<string, boolean>();
   private checkingTurns = new Set<string>();
@@ -403,6 +406,7 @@ export class Manager implements SessionHost, SessionToolHost {
         if (this.pendingTags.get(info.sessionId) === (info.tag ?? '')) this.pendingTags.delete(info.sessionId);
         const s = this.sessions.get(info.sessionId);
         if (s && !s.cwd && info.cwd) s.cwd = info.cwd;
+        this.noteMessageTime(info);
         await this.applyStoredTag(info);
       }
       for (const id of removed) this.markDirty(id);
@@ -414,6 +418,13 @@ export class Manager implements SessionHost, SessionToolHost {
     } finally {
       this.listing = false;
     }
+  }
+
+  private noteMessageTime(info: SDKSessionInfo): void {
+    const stamp = `${info.lastModified}:${info.fileSize ?? ''}`;
+    if (this.messageAt.get(info.sessionId)?.stamp === stamp) return;
+    const file = findTranscript(info.sessionId, info.cwd ?? '');
+    this.messageAt.set(info.sessionId, { stamp, at: file ? lastMessageAt(file) : 0 });
   }
 
   /** A tag chosen before the transcript existed is written once it does. */
@@ -941,7 +952,8 @@ export class Manager implements SessionHost, SessionToolHost {
 
     const cwd = this.cwdFor(id) || s?.cwd || '';
     const created = info?.createdAt ?? (rec?.createdAt ? Date.parse(rec.createdAt) : 0);
-    let updated = Math.max(info?.lastModified ?? 0, created || 0, s?.listedActive ?? 0);
+    const lastMsg = this.messageAt.get(id)?.at;
+    let updated = Math.max(lastMsg || info?.lastModified || 0, created || 0, s?.listedActive ?? 0);
     const title =
       rec?.title?.trim() ||
       this.pendingTitles.get(id) ||
