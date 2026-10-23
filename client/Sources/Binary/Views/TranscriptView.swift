@@ -26,6 +26,8 @@ struct TranscriptView<Source: TranscriptSource>: View {
     @State private var expansion = ExpansionStore()
     /// The row a jump landed on, marked for a moment.
     @State private var highlighted: String?
+    /// Earlier rows are being added: keep the distance to the end, not to the top.
+    @State private var holdingEnd = false
 
     private var rowGap: CGFloat { 16 * min(theme.scale, 1.2) }
 
@@ -70,25 +72,10 @@ struct TranscriptView<Source: TranscriptSource>: View {
                     VStack(alignment: .leading, spacing: 0) {
                         let shown = source.items.suffix(window)
                         if source.items.count > window || source.hasMore {
-                            Button {
-                                let anchor = shown.first?.id
-                                // Everything loaded is shown: fetch older entries too.
-                                let fetch = source.items.count <= window
-                                window += TranscriptWindow.step
-                                if fetch { Task { await source.loadOlder() } }
-                                // Keep the row that was first in view where it was.
-                                if let anchor {
-                                    DispatchQueue.main.async { proxy.scrollTo(anchor, anchor: .top) }
-                                }
-                            } label: {
-                                if source.loadingOlder {
-                                    ProgressView().controlSize(.small)
-                                } else {
-                                    Label(tr("Load earlier messages"), systemImage: "arrow.up.circle")
-                                }
-                            }
-                            .buttonStyle(.themed(.ghost, compact: true))
-                            .frame(maxWidth: .infinity)
+                            // Earlier rows load on their own as the reader nears the top.
+                            ProgressView().controlSize(.small)
+                                .frame(maxWidth: .infinity)
+                                .padding(.bottom, rowGap)
                         }
                         if source.items.isEmpty && source.partial == nil && !busy {
                             VStack(spacing: 8) {
@@ -132,6 +119,11 @@ struct TranscriptView<Source: TranscriptSource>: View {
                     .frame(maxWidth: .infinity)
                     // Short transcripts fill the view, pinned to the bottom like a chat.
                     .frame(minHeight: geo.size.height, alignment: .bottom)
+                    .background(PrependKeeper(holding: holdingEnd) { nearTop in
+                        // Not while following the end: a transcript opening at the
+                        // bottom passes the top before it gets there.
+                        if nearTop && !atBottom { showEarlier() }
+                    })
                     .slimScrollers()
                 }
                 .coordinateSpace(name: "transcriptViewport")
@@ -249,6 +241,22 @@ struct TranscriptView<Source: TranscriptSource>: View {
             } else {
                 return
             }
+        }
+    }
+
+    /// Shows the next rows above, fetching older entries once everything
+    /// loaded is shown. The view holds its distance to the end until they
+    /// are laid out.
+    private func showEarlier() {
+        guard !holdingEnd, source.items.count > window || (source.hasMore && !source.loadingOlder) else { return }
+        let fetch = source.items.count <= window
+        holdingEnd = true
+        window += TranscriptWindow.step
+        Task {
+            if fetch { await source.loadOlder() }
+            // Text views settle their heights after the first layout pass.
+            try? await Task.sleep(nanoseconds: 300_000_000)
+            holdingEnd = false
         }
     }
 
@@ -658,6 +666,151 @@ private struct ScrollPhaseWatcher: ViewModifier {
         #endif
     }
 }
+
+/// Keeps the rows in view where they are while `holding` (earlier rows are
+/// being added above them), and says when the reader is within a screen of
+/// the top. Content added above otherwise pushed the view to its start.
+/// Works on the platform scroll view: it moves the visible area in the same
+/// layout pass the content grew in, so no frame shows the rows pushed down
+/// (SwiftUI's scroll position can only be set a pass later).
+private struct PrependKeeper: View {
+    let holding: Bool
+    let onScroll: (_ nearTop: Bool) -> Void
+
+    var body: some View {
+        Representable(holding: holding, onScroll: onScroll).allowsHitTesting(false)
+    }
+
+    #if os(macOS)
+    private struct Representable: NSViewRepresentable {
+        let holding: Bool
+        let onScroll: (Bool) -> Void
+        func makeNSView(context: Context) -> PrependKeeperView { PrependKeeperView() }
+        func updateNSView(_ view: PrependKeeperView, context: Context) {
+            view.holding = holding
+            view.onScroll = onScroll
+            view.attach()
+        }
+    }
+    #else
+    private struct Representable: UIViewRepresentable {
+        let holding: Bool
+        let onScroll: (Bool) -> Void
+        func makeUIView(context: Context) -> PrependKeeperView { PrependKeeperView() }
+        func updateUIView(_ view: PrependKeeperView, context: Context) {
+            view.holding = holding
+            view.onScroll = onScroll
+            view.attach()
+        }
+    }
+    #endif
+}
+
+#if os(macOS)
+final class PrependKeeperView: NSView {
+    var holding = false
+    var onScroll: (Bool) -> Void = { _ in }
+    private weak var doc: NSView?
+    private var height: CGFloat = 0
+    private var nearTop = false
+    private var observers: [NSObjectProtocol] = []
+
+    override func viewDidMoveToWindow() {
+        super.viewDidMoveToWindow()
+        attach()
+    }
+
+    func attach() {
+        guard let scroll = enclosingScrollView, let doc = scroll.documentView, doc !== self.doc else { return }
+        observers.forEach(NotificationCenter.default.removeObserver)
+        self.doc = doc
+        height = doc.frame.height
+        doc.postsFrameChangedNotifications = true
+        scroll.contentView.postsBoundsChangedNotifications = true
+        // Delivered as they happen (no queue), inside the layout pass.
+        observers = [
+            NotificationCenter.default.addObserver(forName: NSView.frameDidChangeNotification, object: doc, queue: nil) { [weak self] _ in
+                MainActor.assumeIsolated { self?.resized() }
+            },
+            NotificationCenter.default.addObserver(forName: NSView.boundsDidChangeNotification, object: scroll.contentView, queue: nil) { [weak self] _ in
+                MainActor.assumeIsolated { self?.scrolled() }
+            },
+        ]
+    }
+
+    private func resized() {
+        guard let doc, let scroll = enclosingScrollView else { return }
+        let added = doc.frame.height - height
+        height = doc.frame.height
+        guard holding, added > 0 else { return }
+        let clip = scroll.contentView
+        var origin = clip.bounds.origin
+        // Flipped (SwiftUI's): the origin counts from the top, so it moves down
+        // with the rows; unflipped it counts from the bottom and already holds.
+        if doc.isFlipped { origin.y += added }
+        clip.scroll(to: origin)
+        scroll.reflectScrolledClipView(clip)
+    }
+
+    private func scrolled() {
+        guard let doc, let clip = enclosingScrollView?.contentView else { return }
+        let fromTop = doc.isFlipped ? clip.bounds.minY : doc.frame.height - clip.bounds.maxY
+        let near = fromTop < clip.bounds.height
+        guard near != nearTop || near else { return }
+        nearTop = near
+        // Not from within the layout pass that moved it.
+        DispatchQueue.main.async { [onScroll] in onScroll(near) }
+    }
+
+    deinit {
+        observers.forEach(NotificationCenter.default.removeObserver)
+    }
+}
+#else
+final class PrependKeeperView: UIView {
+    var holding = false
+    var onScroll: (Bool) -> Void = { _ in }
+    private weak var scroll: UIScrollView?
+    private var observations: [NSKeyValueObservation] = []
+    private var nearTop = false
+
+    override func didMoveToWindow() {
+        super.didMoveToWindow()
+        attach()
+    }
+
+    func attach() {
+        var v = superview
+        while let s = v, !(s is UIScrollView) { v = s.superview }
+        guard let scroll = v as? UIScrollView, scroll !== self.scroll else { return }
+        self.scroll = scroll
+        // Called as the values change, inside the layout pass.
+        observations = [
+            scroll.observe(\.contentSize, options: [.old, .new]) { [weak self] s, c in
+                MainActor.assumeIsolated { self?.resized(s, from: c.oldValue?.height ?? 0, to: c.newValue?.height ?? 0) }
+            },
+            scroll.observe(\.contentOffset, options: [.new]) { [weak self] s, _ in
+                MainActor.assumeIsolated { self?.scrolled(s) }
+            },
+        ]
+    }
+
+    private func resized(_ scroll: UIScrollView, from old: CGFloat, to new: CGFloat) {
+        let added = new - old
+        guard holding, added > 0, old > 0 else { return }
+        var offset = scroll.contentOffset
+        offset.y += added
+        scroll.contentOffset = offset
+    }
+
+    private func scrolled(_ scroll: UIScrollView) {
+        let near = scroll.contentOffset.y + scroll.adjustedContentInset.top < scroll.bounds.height
+        guard near != nearTop || near else { return }
+        nearTop = near
+        DispatchQueue.main.async { [onScroll] in onScroll(near) }
+    }
+}
+#endif
 
 /// Opens at the bottom (or top) without pinning there as content grows,
 /// which would pull a reader who scrolled up back down.

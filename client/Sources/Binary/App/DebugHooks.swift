@@ -28,7 +28,7 @@ import AppKit
 ///   BINARY_KEYS=<steps>            after 3 s, feed the focused field steps split by "|":
 ///                                  ⇧↩, ↩, ⇥, ⌘[, ⌘], mark:<text> (input-method candidates), or text
 ///   BINARY_EFFORT_PANEL=1          open the effort panel 2.5 s after launch
-///   BINARY_LOAD_OLDER=1            press "Load earlier messages" 2.5 s after a session opens
+///   BINARY_LOAD_OLDER=1            fetch earlier messages 2.5 s after a session opens
 ///   BINARY_PROJECT_PICKER=1        with BINARY_NEW_SESSION: open the project list
 ///   BINARY_EDIT_PROJECT=new|current with BINARY_NEW_SESSION: open the project editor
 ///   BINARY_PREVIEW=<path>          with BINARY_SELECT: preview that file (relative to its folder)
