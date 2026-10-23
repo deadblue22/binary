@@ -248,7 +248,7 @@ struct SessionInspector: View {
 
     @ViewBuilder
     private func tasksCard(_ s: SessionSummary) -> some View {
-        let children = conn.children(of: s.id).sorted { $0.updatedAt > $1.updatedAt }
+        let children = conn.children(of: s.id).sorted(by: SidebarBuilder.sorter(.updated))
         let agents = conn.subagents[s.id] ?? []
         let count = children.count + max(agents.count, s.subagentCount ?? 0)
         if count > 0 {

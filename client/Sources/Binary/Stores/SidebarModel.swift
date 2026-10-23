@@ -315,21 +315,27 @@ enum SidebarBuilder {
             || (s.group?.lowercased().contains(q) ?? false)
     }
 
+    /// A total order: many sessions share a timestamp (to the millisecond),
+    /// and the sessions come from a dictionary, so ties fall back to the id
+    /// to keep rows from trading places on every update.
     static func sorter(_ sort: SessionSort) -> (SessionSummary, SessionSummary) -> Bool {
+        func recent(_ a: SessionSummary, _ b: SessionSummary) -> Bool {
+            a.updatedAt != b.updatedAt ? a.updatedAt > b.updatedAt : a.id < b.id
+        }
         switch sort {
         case .updated:
-            return { $0.updatedAt > $1.updatedAt }
+            return recent
         case .created:
-            return { $0.createdAt != $1.createdAt ? $0.createdAt > $1.createdAt : $0.updatedAt > $1.updatedAt }
+            return { $0.createdAt != $1.createdAt ? $0.createdAt > $1.createdAt : recent($0, $1) }
         case .title:
             return { a, b in
                 let r = a.title.localizedStandardCompare(b.title)
-                return r == .orderedSame ? a.updatedAt > b.updatedAt : r == .orderedAscending
+                return r == .orderedSame ? recent(a, b) : r == .orderedAscending
             }
         case .project:
             return { a, b in
                 let r = a.cwd.localizedStandardCompare(b.cwd)
-                return r == .orderedSame ? a.updatedAt > b.updatedAt : r == .orderedAscending
+                return r == .orderedSame ? recent(a, b) : r == .orderedAscending
             }
         }
     }
