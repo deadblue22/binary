@@ -89,6 +89,11 @@ struct TranscriptView<Source: TranscriptSource>: View {
                             .padding(.top, 60)
                         }
                         rowsView(Array(shown), busy: busy, viewport: geo.size.height)
+                        ForEach(source.outgoing) { m in
+                            UserMessageView(text: m.text, localImages: m.images, status: m.sent ? tr("Sent") : tr("Sending…"))
+                                .padding(.top, rowGap)
+                                .id(m.id)
+                        }
                         if let p = source.partial {
                             PartialView(partial: p)
                                 .padding(.top, rowGap)
@@ -312,13 +317,19 @@ struct UserMessageView: View {
     let raw: String
     let imageKeys: [String?]
     var time: String? = nil
+    /// Images of a message not on the server yet, and where it stands.
+    var localImages: [PlatformImage] = []
+    var status: String? = nil
     @Environment(\.theme) private var theme
     @RowExpanded private var expanded = false
 
-    init(text: String, imageKeys: [String?] = [], time: String? = nil) {
+    init(text: String, imageKeys: [String?] = [], time: String? = nil,
+         localImages: [PlatformImage] = [], status: String? = nil) {
         self.raw = text
         self.imageKeys = imageKeys
         self.time = time
+        self.localImages = localImages
+        self.status = status
     }
 
     private var text: String { raw.trimmingCharacters(in: .whitespacesAndNewlines) }
@@ -328,13 +339,21 @@ struct UserMessageView: View {
         HStack(alignment: .top) {
             Spacer(minLength: 48)
             VStack(alignment: .trailing, spacing: 6) {
-                if !imageKeys.isEmpty {
+                if !imageKeys.isEmpty || !localImages.isEmpty {
                     // Images sit above the bubble, as in chat apps.
-                    let h: CGFloat = imageKeys.count == 1 ? 240 : 150
+                    let h: CGFloat = imageKeys.count + localImages.count == 1 ? 240 : 150
                     ScrollView(.horizontal) {
                         HStack(spacing: 8) {
                             ForEach(Array(imageKeys.enumerated()), id: \.offset) { _, key in
                                 RemoteImageThumb(key: key, height: h)
+                            }
+                            ForEach(Array(localImages.enumerated()), id: \.offset) { _, image in
+                                Image(platformImage: image)
+                                    .resizable()
+                                    .aspectRatio(contentMode: .fit)
+                                    .frame(maxWidth: h * 1.6, maxHeight: h)
+                                    .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+                                    .overlay(RoundedRectangle(cornerRadius: 10, style: .continuous).strokeBorder(theme.c.border))
                             }
                         }
                     }
@@ -360,7 +379,7 @@ struct UserMessageView: View {
                     .background(bubble.fill(theme.c.userBubble))
                     .overlay(bubble.strokeBorder(theme.c.userBubbleBorder))
                 }
-                if let t = Format.clock(time) {
+                if let t = status ?? Format.clock(time) {
                     Text(t)
                         .font(theme.font(.small))
                         .foregroundStyle(theme.c.textFaint)

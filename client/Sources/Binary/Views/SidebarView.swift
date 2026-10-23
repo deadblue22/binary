@@ -470,6 +470,10 @@ struct SidebarView: View {
             }
             .id(n.ref)
             .onTapGesture { click(n.ref) }
+            // Alongside the single click, so selecting isn't held back waiting for a second one.
+            .simultaneousGesture(TapGesture(count: 2).onEnded {
+                if NSEvent.modifierFlags.isDisjoint(with: [.command, .shift]) { ask(.renameSession(n.ref, n.session.title)) }
+            })
             .contextMenu { sessionMenu(n, conn) }
             .draggable(DragPayload.sessions(conn.id, targets(n.ref).map(\.session)).string) {
                 DragPreview(title: n.session.title, count: targets(n.ref).count)

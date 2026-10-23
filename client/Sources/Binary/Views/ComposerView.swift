@@ -258,7 +258,7 @@ struct ComposerView: View {
                     images = sent
                 }
             } else {
-                switch await controller.send(msg, images: sent.map(\.wire)) {
+                switch await controller.send(msg, images: sent.map(\.wire), previews: sent.map(\.thumbnail)) {
                 case .sent:
                     break
                 case .queued(let id):

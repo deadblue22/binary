@@ -295,6 +295,8 @@
  "Select or add a server": "选择或添加一个服务器",
  "Send": "发送",
  "Send (↩) · ⇧↩ or ⌥↩ for a new line": "发送 (↩) · ⇧↩ 或 ⌥↩ 换行",
+ "Sending…": "发送中…",
+ "Sent": "已发送",
  "Server": "服务器",
  "Server offline: {0}": "服务器离线：{0}",
  "Servers": "服务器",

@@ -17,6 +17,18 @@ struct TranscriptItem: Identifiable, Hashable {
     var time: String?
 }
 
+/// A message shown in the transcript from the moment it is sent, until the
+/// server's copy of it arrives.
+struct OutgoingMessage: Identifiable {
+    let id = UUID()
+    let text: String
+    let images: [PlatformImage]
+    /// The server took it; it shows up once Claude Code writes it down.
+    var sent = false
+    /// User rows already shown when it was sent: its copy is a row not among these.
+    let before: Set<String>
+}
+
 /// Live view of one session: transcript, streaming text, pending permission
 /// requests, plus the actions a client can take on it.
 @MainActor
@@ -31,6 +43,7 @@ final class SessionController {
     private(set) var hasMore = false
     private(set) var partial: Partial?
     private(set) var permissions: [PermissionRequest] = []
+    private(set) var outgoing: [OutgoingMessage] = []
     private(set) var loaded = false
     private(set) var connected = false
     private(set) var loadingOlder = false
@@ -226,6 +239,23 @@ final class SessionController {
 
     private func rebuild() {
         items = TranscriptBuilder.items(from: entries)
+        settleOutgoing()
+    }
+
+    /// Drops outgoing messages whose copy has arrived: a new user row with the
+    /// same text, or else (the server may reword it) the oldest one sent.
+    private func settleOutgoing() {
+        guard !outgoing.isEmpty else { return }
+        for item in items {
+            guard case .user(let text, _) = item.kind else { continue }
+            let t = text.trimmingCharacters(in: .whitespacesAndNewlines)
+            let fresh = outgoing.indices.filter { !outgoing[$0].before.contains(item.id) }
+            guard !fresh.isEmpty else { continue }
+            if let i = fresh.first(where: { outgoing[$0].text == t }) ?? fresh.first(where: { outgoing[$0].sent }) {
+                outgoing.remove(at: i)
+                if outgoing.isEmpty { return }
+            }
+        }
     }
 
     // MARK: - Actions
@@ -257,7 +287,24 @@ final class SessionController {
         case failed
     }
 
-    func send(_ text: String, images: [WireImage] = []) async -> SendResult {
+    /// Shows the message in the transcript right away (`previews` are its
+    /// images), marked sent once the server has it.
+    func send(_ text: String, images: [WireImage] = [], previews: [PlatformImage] = []) async -> SendResult {
+        let before = Set(items.compactMap { if case .user = $0.kind { $0.id } else { nil } })
+        let msg = OutgoingMessage(text: text.trimmingCharacters(in: .whitespacesAndNewlines), images: previews, before: before)
+        outgoing.append(msg)
+        let result = await post(text, images: images)
+        if result == .sent {
+            if let i = outgoing.firstIndex(where: { $0.id == msg.id }) { outgoing[i].sent = true }
+            settleOutgoing()
+        } else {
+            // Queued messages show in the queue; failed ones go back to the box.
+            outgoing.removeAll { $0.id == msg.id }
+        }
+        return result
+    }
+
+    private func post(_ text: String, images: [WireImage]) async -> SendResult {
         do {
             struct B: Encodable { var text: String; var images: [WireImage]? }
             // 202 with `queued` when another program is mid-turn; older
@@ -476,7 +523,13 @@ protocol TranscriptSource: AnyObject, Observable {
     var activityText: String? { get }
     var waitingForApproval: Bool { get }
     var cwd: String? { get }
+    /// Messages sent from here that the transcript doesn't show yet.
+    var outgoing: [OutgoingMessage] { get }
     func loadOlder() async
+}
+
+extension TranscriptSource {
+    var outgoing: [OutgoingMessage] { [] }
 }
 
 extension SessionController: TranscriptSource {
