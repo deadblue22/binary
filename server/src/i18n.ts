@@ -45,6 +45,7 @@ const CATALOG = {
   evCIPr: 'CI update · {pr}',
   evScheduled: 'Scheduled task: {name}',
   evScheduledAnon: 'Scheduled task',
+  evRestart: "Binary's server restarted; this session was resumed",
   withBody: "{summary}\n\n{body}",
   truncatedValue: "{head}\n… (truncated, {n} characters in total)",
   defaultModel: "Claude Code's default model",

@@ -433,6 +433,9 @@ struct SystemRow: View {
             // Something the desktop app injected (linked-session updates,
             // messages from other sessions, CI, scheduled tasks): a quiet line.
             TaskNotificationRow(text: text, isError: isError, icon: Self.eventIcon(event), dim: true)
+        } else if subtype == "binary_restart" {
+            // binaryd resumed this session after a restart and told Claude so.
+            TaskNotificationRow(text: text, isError: false, icon: "arrow.clockwise.circle", dim: true)
         } else if subtype == "compact_summary" {
             VStack(alignment: .leading, spacing: 8) {
                 Button {

@@ -67,6 +67,8 @@ server/
   src/holders.ts       which program holds an external claude process (desktop app, tmux, terminal, IDE)
   src/lister.ts        calls listSessions in a worker thread (it parses the head and tail of every transcript synchronously, which would block requests on the main thread)
   src/recent.ts        "recent directories": worktrees map to their main repo, temp directories and desktop scratch directories are skipped
+  src/bgtasks.ts       background tasks of an external session, from its transcript
+  src/restart.ts       what a stop cut off (resume.json) and the note a resumed session gets
   src/tools.ts         get_session / set_session_title for Claude inside sessions
   src/i18n.ts          English and Chinese for human-readable text (activity, errors, markers)
   src/normalize.ts     SDK messages → Entry for client rendering
@@ -104,6 +106,8 @@ external: `claude agents --json` reports it open in a terminal, IDE or the deskt
 ```
 
 `activity` comes from streaming fragments, tool calls, `task_summary`, `api_retry` and so on; for external sessions it is "Running in {program}" or "Open in {program}".
+
+**Restarts.** binaryd's claude processes are its children and talk to it over pipes, so they end when it does (the conversation itself is in the transcript and resumes with `--resume`). To make a restart cost as little as possible, a stop (SIGTERM/SIGINT) works in steps: binaryd keeps serving, gives running turns up to 30 seconds to end (a turn waiting for approval isn't waited for; a second signal stops waiting), and queues every message that arrives meanwhile (202 with `queued`, as for sessions busy elsewhere). Then it records in `~/.binary/resume.json` (0600) each session that still had a turn running or waiting, non-housekeeping background tasks, or queued messages, and stops the processes. The next binaryd reads and deletes that file after it starts listening: a session whose turn was cut off or whose tasks were stopped first gets a `<binary-restart>` message telling Claude what happened (don't repeat steps that already took effect; which tasks to start again), shown in the conversation as a system line; then its queued messages are sent in order. The services allow for the wait: launchd `ExitTimeOut` 60, systemd `TimeoutStopSec=60` with `KillMode=mixed` (so the stop signal goes to binaryd alone, not to every process in the unit at once; launchd already signals only the job's process). Messages sent while no binaryd is listening still fail, and the client puts them back in the composer.
 
 ### 3.4 Settings changes
 

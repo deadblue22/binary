@@ -174,8 +174,9 @@ export function createHandler(o: ApiOptions): (req: IncomingMessage, res: Server
     if (!text.trim() && !images.length) throw new HttpError(400, T('emptyMessage'));
     const why = s.live ? undefined : m.cannotRun(s.id);
     if (why) throw new HttpError(409, why);
-    // Another program is mid-turn on it: hold the message until that turn ends.
-    if (m.busyElsewhere(s.id)) return ok({ ok: true, queued: m.enqueue(s.id, text, images) }, 202);
+    // Another program is mid-turn on it, or binaryd is restarting: hold the
+    // message until that turn ends or the next binaryd starts.
+    if (m.closing || m.busyElsewhere(s.id)) return ok({ ok: true, queued: m.enqueue(s.id, text, images) }, 202);
     try {
       await s.send(text, images);
     } catch (err) {

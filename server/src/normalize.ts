@@ -4,6 +4,7 @@
 
 import { randomUUID } from 'node:crypto';
 import { T, type Msg } from './i18n.js';
+import { NOTE_TAG } from './restart.js';
 
 const MAX_TEXT = 16 * 1024;
 const MAX_INPUT = 32 * 1024;
@@ -275,6 +276,11 @@ function userString(raw: string): Partialish | undefined {
       text: truncate(result ? `${summary}\n\n${result}` : summary, MAX_TEXT)[0],
       ...(status === 'failed' && { isError: true }),
     };
+  }
+  if (t.startsWith(`<${NOTE_TAG}>`)) {
+    // What binaryd told Claude when it resumed the session after a restart.
+    const body = between(t, `<${NOTE_TAG}>`, `</${NOTE_TAG}>`).trim();
+    return { kind: 'system', subtype: 'binary_restart', text: T('withBody', { summary: T('evRestart'), body: truncate(body, MAX_TEXT)[0] }) };
   }
   const ev = appEvent(t);
   if (ev) return ev;

@@ -41,6 +41,7 @@ export function launchdPlist(v: ServiceVars): string {
   </dict>
   <key>RunAtLoad</key><true/>
   <key>KeepAlive</key><true/>
+  <key>ExitTimeOut</key><integer>60</integer>
   <key>StandardOutPath</key><string>${xml(v.log)}</string>
   <key>StandardErrorPath</key><string>${xml(v.log)}</string>
 </dict>
@@ -59,6 +60,9 @@ ExecStart=${q(v.node)} ${q(v.script)} serve --home ${q(v.home)}
 Environment=${q('PATH=' + v.path)}
 Restart=on-failure
 RestartSec=3
+# Signal binaryd alone first: it lets running turns end, then stops its claude processes.
+KillMode=mixed
+TimeoutStopSec=60
 
 [Install]
 WantedBy=default.target

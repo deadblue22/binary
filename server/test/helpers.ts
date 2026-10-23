@@ -18,6 +18,8 @@ export interface Harness {
   launches(): string[];
   /** Replaces what `claude agents --json` reports from now on. */
   setAgents(agents: unknown[]): void;
+  /** Stops the manager as binaryd does on a signal and starts a new one on the same state. */
+  restart(graceMs?: number): Promise<void>;
   close(): Promise<void>;
 }
 
@@ -37,8 +39,6 @@ export async function harness(
   mkdirSync(join(configDir, 'projects'), { recursive: true });
   mkdirSync(cwd);
   process.env.CLAUDE_CONFIG_DIR = configDir;
-  const cfg = loadConfig(join(root, 'home'));
-  const store = new Store(cfg.dir);
   const env: Record<string, string> = {
     PATH: process.env.PATH ?? '',
     HOME: process.env.HOME ?? '',
@@ -46,22 +46,26 @@ export async function harness(
     FAKE_AGENTS: JSON.stringify(opts.agents ?? []),
     FAKE_AGENTS_FILE: join(root, 'agents.json'),
   };
-  const manager = new Manager(cfg, store, {
-    claudeBin: FAKE,
-    claudeVersion: '9.9.9',
-    claudePath: opts.claudePath ?? FAKE,
-    env,
-    desktopDir: opts.desktopDir,
-    // Test folders live under the OS temp dir: only what a test names is scratch.
-    tempDirs: opts.tempDirs ?? [],
-    log: () => {},
-  });
-  await manager.start();
-  return {
+  const start = async () => {
+    const cfg = loadConfig(join(root, 'home'));
+    const m = new Manager(cfg, new Store(cfg.dir), {
+      claudeBin: FAKE,
+      claudeVersion: '9.9.9',
+      claudePath: opts.claudePath ?? FAKE,
+      env,
+      desktopDir: opts.desktopDir,
+      // Test folders live under the OS temp dir: only what a test names is scratch.
+      tempDirs: opts.tempDirs ?? [],
+      log: () => {},
+    });
+    await m.start();
+    return m;
+  };
+  const h: Harness = {
     root,
     configDir,
     cwd,
-    manager,
+    manager: await start(),
     launches: () => {
       try {
         return readFileSync(join(configDir, 'launches.log'), 'utf8').trim().split('\n').filter(Boolean);
@@ -70,8 +74,14 @@ export async function harness(
       }
     },
     setAgents: (agents) => writeFileSync(join(root, 'agents.json'), JSON.stringify(agents)),
-    close: () => manager.shutdown(),
+    restart: async (graceMs = 0) => {
+      await h.manager.shutdown(graceMs);
+      h.manager = await start();
+      await h.manager.resumeInterrupted();
+    },
+    close: () => h.manager.shutdown(),
   };
+  return h;
 }
 
 export async function waitFor(what: string, cond: () => boolean, ms = 15_000): Promise<void> {

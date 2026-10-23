@@ -19,6 +19,13 @@ import { Store } from './store.js';
 
 export const VERSION = '0.2.0';
 
+/**
+ * How long a stop waits for running turns to end. The services allow 60s
+ * (launchd ExitTimeOut, systemd TimeoutStopSec), with room left to stop the
+ * processes afterwards.
+ */
+const SHUTDOWN_GRACE_MS = 30_000;
+
 const USAGE = `binaryd ${VERSION} — Binary server for Claude Code sessions
 
 Usage:
@@ -97,14 +104,19 @@ async function serve(cfg: Config): Promise<void> {
     log('WARNING: serving plain HTTP on a non-loopback address; use --tls-cert/--tls-key, an SSH tunnel or a private network');
   }
 
+  // Sessions the previous binaryd cut off when it stopped.
+  void manager.resumeInterrupted().catch((err) => log(`resuming interrupted sessions failed: ${(err as Error).message}`));
+
   let stopping = false;
   const shutdown = async () => {
-    if (stopping) return;
+    // A second signal stops waiting for running turns.
+    if (stopping) return manager.hurryShutdown();
     stopping = true;
     log('shutting down');
+    // Still serving while turns finish: new messages are queued for the next start.
+    await manager.shutdown(SHUTDOWN_GRACE_MS);
     server.close();
     server.closeAllConnections();
-    await manager.shutdown();
     process.exit(0);
   };
   process.on('SIGINT', shutdown);

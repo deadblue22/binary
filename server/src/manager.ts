@@ -23,6 +23,7 @@ import {
   type SDKSessionInfo,
 } from '@anthropic-ai/claude-agent-sdk';
 import { runningTasks } from './bgtasks.js';
+import { resumeNote, saveInterrupted, takeInterrupted, type Interrupted } from './restart.js';
 import { activeAgents, type ActiveAgent } from './claude.js';
 import type { Config } from './config.js';
 import { DesktopLinks } from './desktop.js';
@@ -298,6 +299,9 @@ export class Manager implements SessionHost, SessionToolHost {
   private lastTurnEnded = new Map<string, boolean>();
   private checkingTurns = new Set<string>();
   private draining = false;
+  /** Shutting down: new messages are held for the next binaryd. */
+  closing = false;
+  private hurry = false;
   /** The account's plan usage (5-hour, weekly windows), as last read. */
   private usage?: PlanUsage;
   private usageReading?: Promise<PlanUsage | undefined>;
@@ -549,13 +553,16 @@ export class Manager implements SessionHost, SessionToolHost {
     return !!agent && !ours && agent.status === 'busy' && !this.turnEnded(id);
   }
 
-  /** Holds a message until the other program's turn ends; see drainQueues. */
+  /**
+   * Holds a message until the other program's turn ends, or while binaryd
+   * shuts down until the next one starts; see drainQueues.
+   */
   enqueue(id: string, text: string, images: ImageInput[]): string {
     const s = this.session(id);
     if (!s) throw new HttpError(404, T('sessionNotFound'));
     const item = { id: randomUUID(), text, images, at: new Date().toISOString() };
     s.queued.push(item);
-    this.log(`session ${id}: message queued until the other program's turn ends`);
+    this.log(`session ${id}: message queued until ${this.closing ? 'binaryd restarts' : "the other program's turn ends"}`);
     this.markDirty(id);
     return item.id;
   }
@@ -575,7 +582,7 @@ export class Manager implements SessionHost, SessionToolHost {
 
   /** Sends queued messages whose session is no longer busy elsewhere, in order. */
   async drainQueues(): Promise<void> {
-    if (this.draining) return;
+    if (this.draining || this.closing) return;
     this.draining = true;
     try {
       for (const s of this.sessions.values()) {
@@ -708,13 +715,64 @@ export class Manager implements SessionHost, SessionToolHost {
     }
   }
 
-  async shutdown(): Promise<void> {
+  /**
+   * Stops binaryd's claude processes. Turns already running get up to graceMs
+   * to end (one waiting for approval won't); messages arriving meanwhile are
+   * queued. Whatever is still cut off (a turn, background tasks, queued
+   * messages) is recorded for resumeInterrupted in the next binaryd.
+   */
+  async shutdown(graceMs = 0): Promise<void> {
+    this.closing = true;
     for (const t of this.timers) clearInterval(t);
     this.lister.close();
     this.searcher.close();
+    const turning = () => [...this.sessions.values()].filter((s) => s.live && (s.state === 'running' || s.state === 'starting'));
+    const deadline = Date.now() + graceMs;
+    if (graceMs > 0 && turning().length) this.log(`waiting up to ${Math.round(graceMs / 1000)}s for ${turning().length} running turn(s) to end`);
+    while (!this.hurry && Date.now() < deadline && turning().length) await new Promise((r) => setTimeout(r, 200));
+    const cut: Interrupted[] = [];
+    for (const s of this.sessions.values()) {
+      const turn = s.live && (s.state === 'running' || s.state === 'starting' || s.state === 'waiting');
+      const tasks = s.live ? [...s.tasks.values()].filter((t) => !t.ambient) : [];
+      if (turn || tasks.length || s.queued.length) cut.push({ id: s.id, turn, tasks, queued: s.queued });
+    }
+    try {
+      saveInterrupted(this.cfg.dir, cut);
+      if (cut.length) this.log(`recorded ${cut.length} session(s) to resume after restart`);
+    } catch (err) {
+      this.log(`could not record sessions to resume: ${(err as Error).message}`);
+    }
     await Promise.all([...this.sessions.values()].filter((s) => s.live).map((s) => s.stop()));
     for (const sub of this.global) sub.close();
     this.store.flush();
+  }
+
+  /** Stop waiting for running turns (a second signal). */
+  hurryShutdown(): void {
+    this.hurry = true;
+  }
+
+  /**
+   * Picks up what the previous binaryd cut off: each such session gets a note
+   * on what happened, then its queued messages, in order.
+   */
+  async resumeInterrupted(): Promise<void> {
+    const prev = takeInterrupted(this.cfg.dir);
+    if (!prev) return;
+    for (const r of prev.sessions) {
+      const s = this.session(r.id);
+      if (!s) continue;
+      const queued = Array.isArray(r.queued) ? r.queued : [];
+      const tasks = Array.isArray(r.tasks) ? r.tasks : [];
+      const items = queued.filter((q) => q && typeof q.text === 'string').map((q) => ({ ...q, images: Array.isArray(q.images) ? q.images : [] }));
+      if (r.turn || tasks.length) {
+        items.unshift({ id: randomUUID(), text: resumeNote({ ...r, tasks }, prev.stoppedAt), images: [], at: new Date().toISOString() });
+      }
+      s.queued.push(...items);
+      this.markDirty(s.id);
+      this.log(`session ${s.id}: resuming after restart (${r.turn ? 'turn cut off' : 'no turn'}, ${tasks.length} task(s), ${queued.length} queued)`);
+    }
+    await this.drainQueues();
   }
 
   // ------------------------------------------------------------ sessions

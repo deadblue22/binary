@@ -30,6 +30,7 @@
  "evCIPr": "CI 状态更新 · {pr}",
  "evScheduled": "定时任务：{name}",
  "evScheduledAnon": "定时任务",
+ "evRestart": "Binary 服务端重启，会话已自动恢复",
  "withBody": "{summary}\n\n{body}",
  "truncatedValue": "{head}\n… (已截断，共 {n} 字符)",
  "defaultModel": "Claude Code 默认模型",
