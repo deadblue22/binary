@@ -78,6 +78,30 @@ function run(cmd: string, args: string[], check = true): void {
   }
 }
 
+/** True while launchd still has the job loaded, including while it is stopping. */
+function launchdLoaded(target: string): boolean {
+  try {
+    execFileSync('launchctl', ['print', target], { stdio: 'ignore' });
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Stops a launchd job and waits until it is gone. bootout returns before the
+ * process has exited, and bootstrap fails while the old job is still unloading
+ * (it may take up to ExitTimeOut while running turns finish).
+ */
+function launchdBootout(target: string): void {
+  run('launchctl', ['bootout', target], false);
+  const deadline = Date.now() + 90_000;
+  while (launchdLoaded(target)) {
+    if (Date.now() > deadline) throw new Error(`${target} did not stop within 90s`);
+    execFileSync('sleep', ['0.5']);
+  }
+}
+
 export function service(action: string, home: string, script: string): void {
   const vars: ServiceVars = {
     node: process.execPath,
@@ -91,12 +115,12 @@ export function service(action: string, home: string, script: string): void {
     const domain = `gui/${process.getuid?.() ?? 501}`;
     if (action === 'install') {
       mkdirSync(dirname(plist), { recursive: true });
-      run('launchctl', ['bootout', `${domain}/${LABEL}`], false);
+      launchdBootout(`${domain}/${LABEL}`);
       writeFileSync(plist, launchdPlist(vars));
       run('launchctl', ['bootstrap', domain, plist]);
       console.log(`installed ${plist}\nlogs: ${vars.log}`);
     } else if (action === 'uninstall') {
-      run('launchctl', ['bootout', `${domain}/${LABEL}`], false);
+      launchdBootout(`${domain}/${LABEL}`);
       rmSync(plist, { force: true });
       console.log('uninstalled');
     } else {
