@@ -1,11 +1,11 @@
 import SwiftUI
 
 /// One session in the list, always on two lines so the list doesn't shift
-/// as sessions start and stop: the title, then what it's doing (while it
-/// works, waits or failed) or its folder, branch and latest summary, with
-/// the time and counts at the end. Nested sessions take one line. Its state
-/// shows as a stripe on the screen's edge (`sessionRow`). Rows with child
-/// sessions or subagents have a count that shows them nested below.
+/// as sessions start and stop: the title, then the server, the project and
+/// what it's doing (while it works, waits or failed), with the time and
+/// counts at the end. Nested sessions take one line. Its state shows as a
+/// stripe on the screen's edge (`sessionRow`). Rows with child sessions or
+/// subagents have a count that shows them nested below.
 struct SessionListRow: View {
     let node: SidebarNode
     let depth: Int
@@ -137,32 +137,24 @@ struct SessionListRow: View {
     @ViewBuilder
     private var secondLine: some View {
         if let detail {
-            Text(detail).foregroundStyle(detailColor)
-        } else if let summary = (s.lastSummary ?? s.preview).flatMap({ $0.isEmpty ? nil : $0 }) {
-            Text("\(Text(place).foregroundStyle(theme.c.textFaint)) · \(Text(summary).foregroundStyle(theme.c.textMuted))")
-                .foregroundStyle(theme.c.textFaint)
+            Text("\(Text(project).foregroundStyle(theme.c.textFaint)) · \(Text(detail).foregroundStyle(detailColor))")
         } else {
-            Text(place).foregroundStyle(theme.c.textFaint)
+            Text(project).foregroundStyle(theme.c.textFaint)
         }
     }
 
-    /// Folder and branch, readable: a worktree under `<repo>/.claude/worktrees`
-    /// shows its repository instead of its generated name and leaves out the
-    /// branch made for it (`claude/<name>`); other generated names drop their
-    /// hash.
-    private var place: String {
+    /// The folder's name, readable: a worktree under `<repo>/.claude/worktrees`
+    /// shows its repository instead of its generated name; other generated
+    /// names drop their hash.
+    private var project: String {
         var folder = s.project.isEmpty ? (s.cwd as NSString).lastPathComponent : s.project
-        var worktree: String?
         if let r = s.cwd.range(of: "/.claude/worktrees/") {
-            worktree = String(s.cwd[r.upperBound...].prefix { $0 != "/" })
             folder = (String(s.cwd[..<r.lowerBound]) as NSString).lastPathComponent
         } else if let r = folder.range(of: #"-(?=[0-9a-f]*[0-9])[0-9a-f]{6}$"#, options: .regularExpression) {
             // Generated folders like scratch-2026-10-10-35992a lose the hash.
             folder.removeSubrange(r)
         }
-        guard let b = s.gitBranch, !b.isEmpty, b != "HEAD",
-              !(worktree.map { !$0.isEmpty && b.hasSuffix($0) } ?? false) else { return folder }
-        return folder + " · " + b
+        return folder
     }
 
     private func marker(_ icon: String) -> some View {
