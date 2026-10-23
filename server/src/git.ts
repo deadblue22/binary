@@ -18,13 +18,19 @@ function git(dir: string, args: string[], timeoutMs = 20_000): Promise<string> {
   });
 }
 
+const WORKTREE_BRANCH_PREFIX = 'claude/';
+const BRANCH_LIMIT = 10;
+
 export interface GitInfo {
   isRepo: boolean;
   /** Top of the working tree that contains the folder. */
   root?: string;
   /** Checked-out branch; absent when HEAD is detached. */
   current?: string;
-  /** Local branches, most recently committed first. */
+  /**
+   * The few most recently committed local branches, for a short picker;
+   * claude/* branches made for session worktrees are left out.
+   */
   branches: string[];
   /** Uncommitted changes to tracked files. */
   dirty?: boolean;
@@ -41,7 +47,7 @@ export async function gitInfo(dir: string): Promise<GitInfo> {
   const [current, branches, status, worktrees] = await Promise.all([
     git(dir, ['symbolic-ref', '--quiet', '--short', 'HEAD']).then((s) => s.trim() || undefined, () => undefined),
     git(dir, ['for-each-ref', '--sort=-committerdate', '--count=300', '--format=%(refname:short)', 'refs/heads']).then(
-      (s) => s.split('\n').filter(Boolean),
+      (s) => s.split('\n').filter((b) => b && !b.startsWith(WORKTREE_BRANCH_PREFIX)).slice(0, BRANCH_LIMIT),
       () => [] as string[],
     ),
     git(dir, ['status', '--porcelain', '--untracked-files=no'], 10_000).then((s) => s.trim() !== '', () => undefined),
@@ -101,7 +107,7 @@ export async function createWorktree(dir: string, name: string, base?: string): 
   const commonDir = resolve(dir, (await git(dir, ['rev-parse', '--git-common-dir'])).trim());
   const mainRoot = dirname(commonDir);
   const path = join(mainRoot, '.claude', 'worktrees', name);
-  const branch = `claude/${name}`;
+  const branch = `${WORKTREE_BRANCH_PREFIX}${name}`;
   if (existsSync(path)) throw new LocalizedError(T('worktreeExists', { path }));
 
   const exclude = join(commonDir, 'info', 'exclude');

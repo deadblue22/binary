@@ -281,7 +281,7 @@ struct NewSessionView: View {
         return Menu {
             Picker(tr("Start From"), selection: Binding(get: { config.branch ?? "" }, set: { config.branch = $0.isEmpty ? nil : $0 })) {
                 Text(tr("Current") + (git?.current.map { " (\($0))" } ?? "")).tag("")
-                ForEach(git?.branches ?? [], id: \.self) { b in Text(b).tag(b) }
+                ForEach(git?.pickerBranches(keeping: config.branch) ?? [], id: \.self) { b in Text(b).tag(b) }
             }
             .pickerStyle(.inline)
             Divider()

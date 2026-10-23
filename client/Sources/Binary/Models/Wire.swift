@@ -404,6 +404,14 @@ struct GitInfo: Decodable, Sendable, Equatable {
     var branches: [String]?
     var dirty: Bool?
     var worktrees: [GitWorktree]?
+
+    /// The branches a picker offers: the server's short recent list, plus a
+    /// chosen branch that has dropped off it, so the selection still shows.
+    func pickerBranches(keeping selected: String?) -> [String] {
+        let list = branches ?? []
+        guard let selected, !selected.isEmpty, !list.contains(selected) else { return list }
+        return [selected] + list
+    }
 }
 
 struct GitWorktree: Decodable, Sendable, Equatable {

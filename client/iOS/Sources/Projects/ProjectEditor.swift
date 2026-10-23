@@ -49,7 +49,7 @@ struct ProjectEditor: View {
                     }
                     Picker(tr("Branch"), selection: Binding(get: { draft.branch ?? "" }, set: { draft.branch = $0.isEmpty ? nil : $0 })) {
                         Text(tr("Current") + (git?.current.map { " (\($0))" } ?? "")).tag("")
-                        ForEach(git?.branches ?? [], id: \.self) { b in Text(b).tag(b) }
+                        ForEach(git?.pickerBranches(keeping: draft.branch) ?? [], id: \.self) { b in Text(b).tag(b) }
                     }
                     .disabled(!isRepo)
                     Toggle(tr("New Worktree for Each Session"), isOn: $draft.worktree)
