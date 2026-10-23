@@ -15,18 +15,10 @@ enum SessionSort: String, Codable, CaseIterable, Identifiable, Sendable {
     }
 }
 
-/// What the list's sections are: the groups made by hand (session tags),
-/// or one section per project folder on each server.
-enum SessionGrouping: String, Codable, CaseIterable, Identifiable, Sendable {
+/// How sessions outside the groups are listed: as one list per server, or
+/// split by project folder. Groups show either way.
+enum SessionGrouping: String, Codable, Sendable {
     case groups, project
-    var id: String { rawValue }
-
-    var label: String {
-        switch self {
-        case .groups: return tr("My Groups")
-        case .project: return tr("Project")
-        }
-    }
 }
 
 enum SessionFilter: String, Codable, CaseIterable, Identifiable, Sendable {

@@ -137,10 +137,7 @@ struct SidebarView: View {
                 }
                 .pickerStyle(.inline)
                 Toggle(tr("Show Copies from Other Servers"), isOn: Binding(get: { org.showMirrors }, set: { org.showMirrors = $0 }))
-                Picker(tr("Group By"), selection: Binding(get: { org.grouping }, set: { org.grouping = $0 })) {
-                    ForEach(SessionGrouping.allCases) { g in Text(g.label).tag(g) }
-                }
-                .pickerStyle(.inline)
+                Toggle(tr("Ungrouped Sessions by Project"), isOn: Binding(get: { org.grouping == .project }, set: { org.grouping = $0 ? .project : .groups }))
                 Picker(tr("Sort"), selection: Binding(get: { org.sort }, set: { org.sort = $0 })) {
                     ForEach(SessionSort.allCases) { s in Text(s.label).tag(s) }
                 }

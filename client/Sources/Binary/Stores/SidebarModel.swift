@@ -22,7 +22,8 @@ struct SidebarGroup: Identifiable {
     var id: String { name }
 }
 
-/// One server's sessions in one project folder, when grouping by project.
+/// One server's ungrouped sessions in one project folder, when those are
+/// split by project.
 struct ProjectGroup: Identifiable {
     let server: UUID
     let folder: String
@@ -43,11 +44,11 @@ struct ProjectGroup: Identifiable {
         return f
     }
 
-    /// Every session of the project on its server, shown or not, to archive
-    /// the project as a whole.
+    /// Every ungrouped session of the project on its server, shown or not,
+    /// to archive the project as a whole.
     @MainActor
     func allSessions(on conn: ServerConnection) -> [SessionRef] {
-        conn.sessions.values.filter { Self.folder(of: $0.cwd) == folder }.map { SessionRef(server: server, session: $0.id) }
+        conn.sessions.values.filter { $0.group == nil && Self.folder(of: $0.cwd) == folder }.map { SessionRef(server: server, session: $0.id) }
     }
 }
 
@@ -222,7 +223,8 @@ enum SidebarBuilder {
         func independent(_ s: SessionSummary) -> Bool {
             guard let p = parent(s), let ps = all[p] else { return false }
             if layout.pinned.contains(s.id) { return true }
-            return byProject ? ProjectGroup.folder(of: s.cwd) != ProjectGroup.folder(of: ps.cwd) : s.group != ps.group
+            if s.group != ps.group { return true }
+            return byProject && s.group == nil && ProjectGroup.folder(of: s.cwd) != ProjectGroup.folder(of: ps.cwd)
         }
         func hasShownAncestor(_ s: SessionSummary) -> Bool {
             if independent(s) { return false }
@@ -247,10 +249,6 @@ enum SidebarBuilder {
 
         section.pinned = roots.filter(\.pinned)
         let rest = roots.filter { !$0.pinned }
-        if byProject {
-            section.projects = projectGroups(rest, server: conn.id, org: org)
-            return section
-        }
         let byGroup = Dictionary(grouping: rest.filter { $0.session.group != nil }) { $0.session.group! }
         let used = conn.groupNames
         for name in org.orderedGroups(conn.id, inUse: used) {
@@ -260,7 +258,12 @@ enum SidebarBuilder {
             if nodes.isEmpty && used.contains(name) { continue }
             section.groups.append(SidebarGroup(name: name, nodes: nodes, collapsed: org.isCollapsed(name)))
         }
-        section.ungrouped = rest.filter { $0.session.group == nil }
+        let ungrouped = rest.filter { $0.session.group == nil }
+        if byProject {
+            section.projects = projectGroups(ungrouped, server: conn.id, org: org)
+        } else {
+            section.ungrouped = ungrouped
+        }
         return section
     }
 
@@ -293,8 +296,6 @@ enum SidebarBuilder {
         func sorted(_ items: [PlacedNode]) -> [PlacedNode] { items.sorted { order($0.node.session, $1.node.session) } }
         var out = MergedSidebar()
         out.pinned = sorted(sections.flatMap { s in s.pinned.map { PlacedNode(node: $0, conn: s.conn) } })
-        // Grouping by project: the groups made by hand don't show.
-        if org.grouping == .project { return out }
         let inUse = sections.reduce(into: Set<String>()) { $0.formUnion($1.conn.groupNames) }
         for name in org.orderedGroups(inUse: inUse) {
             let items = sorted(sections.flatMap { s in
