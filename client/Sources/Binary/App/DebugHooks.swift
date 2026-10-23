@@ -38,6 +38,8 @@ import AppKit
 ///                                  the transcript and print the time each step takes
 ///   BINARY_SCROLL_BENCH_RANGE=<pt> with BINARY_SCROLL_BENCH: scroll only that far from the end
 ///   BINARY_LOG=1                   trace sidebar reveal and redirect steps on stderr
+///   BINARY_SEARCH=<query>          type a query into the sidebar search
+///   BINARY_OPEN_MATCH=1            with BINARY_SEARCH: open the first message that matched
 /// A text dump of client state (servers, menus, scroll views) is written next
 /// to the snapshot as <file.png>.txt.
 @MainActor

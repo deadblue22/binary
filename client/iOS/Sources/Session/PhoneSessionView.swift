@@ -17,7 +17,8 @@ struct PhoneSessionView: View {
         @Bindable var nav = nav
         VStack(spacing: 0) {
             if controller.loaded {
-                TranscriptView(source: controller)
+                TranscriptView(source: controller, jump: nav.jump?.ref == controller.ref ? nav.jump : nil,
+                               onJumped: { if nav.jump?.ref == controller.ref { nav.jump = nil } })
                     .environment(\.fileLinkHandler, FileLinks.handler(server: controller.conn.id, session: controller.id, nav: nav))
                     .environment(\.openURL, OpenURLAction { url in
                         FileLinks.handler(server: controller.conn.id, session: controller.id, nav: nav).open(url)

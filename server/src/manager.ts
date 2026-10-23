@@ -29,6 +29,7 @@ import { DesktopLinks } from './desktop.js';
 import { holderOf, processTable, type Holder } from './holders.js';
 import { createWorktree, switchBranch, worktreeName } from './git.js';
 import { SessionLister } from './lister.js';
+import { SessionSearch, type SearchResult } from './search.js';
 import { SESSION_TOOL_SERVER, SESSION_TOOLS, sessionTools, type SessionToolHost } from './tools.js';
 import { DEFAULT_LANG, encode, LocalizedError, T, type Lang, type Msg, type Text } from './i18n.js';
 import { event, Subscriber, type Event, type Sink } from './log.js';
@@ -312,6 +313,7 @@ export class Manager implements SessionHost, SessionToolHost {
   private desktop: DesktopLinks;
   private dirChecks = new Map<string, { exists: boolean; at: number }>();
   private lister = new SessionLister();
+  private searcher = new SessionSearch();
   private tempDirs: string[];
   readonly logFn: (msg: string) => void;
 
@@ -361,6 +363,10 @@ export class Manager implements SessionHost, SessionToolHost {
     every(200, () => this.flushDirty());
     every(1000, () => this.tick());
     every(30_000, () => this.reap());
+    // The text index takes a few seconds to build: start it before the first search.
+    const warm = setTimeout(() => this.searcher.warm(), 2_000);
+    warm.unref();
+    this.timers.push(warm);
     // Plan usage for /info, read once in the background after startup.
     setTimeout(() => void this.planUsage(), 5_000).unref();
   }
@@ -705,6 +711,7 @@ export class Manager implements SessionHost, SessionToolHost {
   async shutdown(): Promise<void> {
     for (const t of this.timers) clearInterval(t);
     this.lister.close();
+    this.searcher.close();
     await Promise.all([...this.sessions.values()].filter((s) => s.live).map((s) => s.stop()));
     for (const sub of this.global) sub.close();
     this.store.flush();
@@ -958,6 +965,12 @@ export class Manager implements SessionHost, SessionToolHost {
     if (s?.queued.length) sum.queued = s.queued.map((q) => ({ id: q.id, text: preview(q.text, 200), images: q.images.length, at: q.at }));
     sum.updatedAt = updated ? new Date(updated).toISOString() : sum.createdAt;
     return sum;
+  }
+
+  /** Sessions whose messages contain every word of q, latest match first. */
+  async search(q: string, limit: number): Promise<SearchResult[]> {
+    const found = await this.searcher.search(q, limit);
+    return found.filter((r) => this.infos.has(r.id) || this.sessions.has(r.id));
   }
 
   summaries(): Summary[] {

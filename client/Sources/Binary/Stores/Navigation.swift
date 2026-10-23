@@ -8,6 +8,13 @@ struct NewSessionDraft: Equatable {
     var template: SessionRef?
 }
 
+struct TranscriptJump: Equatable {
+    var ref: SessionRef
+    /// The entry to show (rows of one entry share it as their id or id prefix).
+    var uuid: String
+    var serial: Int
+}
+
 @MainActor
 @Observable
 final class Navigation {
@@ -33,6 +40,15 @@ final class Navigation {
     @ObservationIgnored var visibleOrder: [SessionRef] = []
     /// Bumped to focus the sidebar search field.
     var searchRequest = 0
+    /// A transcript row to scroll to, picked from a search match; the
+    /// session's transcript takes it once it shows that session.
+    var jump: TranscriptJump?
+
+    /// Opens a session at one of its messages.
+    func open(_ ref: SessionRef, at uuid: String) {
+        jump = TranscriptJump(ref: ref, uuid: uuid, serial: (jump?.serial ?? 0) + 1)
+        selection = ref
+    }
     /// Set by the sidebar; scrolls a row into view without a state change
     /// (a state round-trip here cost a second full sidebar update per click).
     @ObservationIgnored var scrollHandler: ((SessionRef) -> Void)?

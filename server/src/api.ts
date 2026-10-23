@@ -139,6 +139,14 @@ export function createHandler(o: ApiOptions): (req: IncomingMessage, res: Server
 
   route('GET', '/api/v1/sessions', () => ok({ sessions: m.summaries() }));
 
+  // Full-text search of what was said in each session (see search.ts).
+  route('GET', '/api/v1/search', async ({ url }) => {
+    const q = (url.searchParams.get('q') ?? '').trim();
+    let limit = Number(url.searchParams.get('limit')) || 100;
+    if (limit <= 0 || limit > 500) limit = 100;
+    return ok({ results: q ? await m.search(q, limit) : [] });
+  });
+
   route('POST', '/api/v1/sessions', async ({ req }) => ok(await m.create(await readJSON(req)), 201));
 
   route('GET', '/api/v1/sessions/{id}', ({ params }) => {

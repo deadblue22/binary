@@ -499,3 +499,19 @@ enum WireDate {
         return e
     }
 }
+
+/// A session whose messages match a search (GET /search, newer servers).
+struct ContentHit: Codable, Hashable, Sendable {
+    struct Snippet: Codable, Hashable, Sendable {
+        /// The transcript entry the match is in.
+        var uuid: String
+        var role: String
+        var time: Date?
+        /// Text around the first match.
+        var text: String
+    }
+    var id: String
+    /// Messages that match.
+    var hits: Int
+    var snippets: [Snippet]
+}

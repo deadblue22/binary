@@ -9,6 +9,7 @@ struct SessionListView: View {
     @Environment(\.theme) private var theme
     @AppStorage("usageCollapsed") private var usageCollapsed = false
     @State private var query = ""
+    @State private var content = ContentSearch()
     @State private var prompt: ListPrompt?
     @State private var promptText = ""
     @State private var notice: String?
@@ -23,7 +24,9 @@ struct SessionListView: View {
 
     var body: some View {
         let mirrors = MirrorIndex(store.orderedConnections)
-        let sections = store.orderedConnections.map { SidebarBuilder.build($0, org: org, query: query, mirrors: mirrors) }
+        let sections = store.orderedConnections.map {
+            SidebarBuilder.build($0, org: org, query: query, mirrors: mirrors, hits: content.hits(for: $0.id, query: query))
+        }
         let merged = SidebarBuilder.merge(sections, org: org)
         List {
             if store.servers.isEmpty {
@@ -43,6 +46,7 @@ struct SessionListView: View {
         .scrollContentBackground(.hidden)
         .background(theme.c.sidebar)
         .searchable(text: $query, prompt: tr("Search titles, folders, content, groups"))
+        .task(id: query) { await content.run(query, on: store.orderedConnections) }
         .refreshable { await refresh() }
         .navigationBarTitleDisplayMode(.inline)
         .toolbarBackground(theme.c.sidebar, for: .navigationBar)
@@ -265,6 +269,12 @@ struct SessionListView: View {
                     guard expanded, (n.session.subagentCount ?? 0) > 0 else { return }
                     await conn.loadSubagents(n.session.id)
                 }
+            if let hit = n.hit {
+                ForEach(hit.snippets.prefix(2), id: \.uuid) { sn in
+                    SnippetListRow(snippet: sn, query: query, depth: depth) { nav.open(n.ref, at: sn.uuid) }
+                        .compactRow()
+                }
+            }
             if expanded && expandable {
                 ForEach(n.children) { c in
                     tree(c, conn: conn, depth: depth + 1)

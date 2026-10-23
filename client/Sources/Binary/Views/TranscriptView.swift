@@ -2,6 +2,10 @@ import SwiftUI
 
 struct TranscriptView<Source: TranscriptSource>: View {
     let source: Source
+    /// A row to scroll to once (a search match); `onJumped` is called when
+    /// it was shown or can't be found.
+    var jump: TranscriptJump? = nil
+    var onJumped: () -> Void = {}
     @Environment(\.theme) private var theme
     @State private var atBottom = true
     /// Last seen position of the transcript's end within its content.
@@ -20,6 +24,8 @@ struct TranscriptView<Source: TranscriptSource>: View {
     /// Which rows' disclosures are open, kept here since rows far from view
     /// are dropped and built again.
     @State private var expansion = ExpansionStore()
+    /// The row a jump landed on, marked for a moment.
+    @State private var highlighted: String?
 
     private var rowGap: CGFloat { 16 * min(theme.scale, 1.2) }
 
@@ -34,11 +40,21 @@ struct TranscriptView<Source: TranscriptSource>: View {
             TranscriptChunk(viewport: viewport, generation: measureGeneration) {
                 ForEach(chunk.range, id: \.self) { i in
                     TranscriptRow(item: rows[i], busy: busy, cwd: source.cwd)
+                        .background {
+                            if highlighted == rows[i].id {
+                                RoundedRectangle(cornerRadius: 8, style: .continuous)
+                                    .fill(theme.c.focus.opacity(0.14))
+                                    .padding(-6)
+                                    .transition(.opacity)
+                            }
+                        }
                         .padding(.top, i == 0 ? 0 : gap(rows[i - 1], rows[i]))
                         .id(rows[i].id)
                         .environment(\.rowExpansion, RowExpansion(store: expansion, row: rows[i].id))
                 }
             }
+            // Rows of a chunk drawn as empty space have no ids to scroll to; the chunk does.
+            .id(TranscriptChunks.scrollID(chunk.id))
         }
     }
 
@@ -162,6 +178,11 @@ struct TranscriptView<Source: TranscriptSource>: View {
                     if atBottom { proxy.scrollTo("bottom", anchor: .bottom) }
                 }
                 .onChange(of: theme) { _, _ in scrollToBottom(proxy, delayed: true) }
+                .task(id: jump?.serial) {
+                    guard let jump else { return }
+                    await show(jump.uuid, proxy)
+                    if !Task.isCancelled { onJumped() }
+                }
                 // Rows drawn as placeholders keep their old height through a resize;
                 // measure them again once it settles.
                 .task(id: MeasureKey(width: geo.size.width, theme: theme)) {
@@ -184,6 +205,46 @@ struct TranscriptView<Source: TranscriptSource>: View {
                     DebugHooks.scrollBench()
                 }
                 #endif
+            }
+        }
+    }
+
+    /// Scrolls to the first row of entry `uuid`, loading older pages until
+    /// it's there, and marks it.
+    private func show(_ uuid: String, _ proxy: ScrollViewProxy) async {
+        func sleep(_ ms: UInt64) async { try? await Task.sleep(nanoseconds: ms * 1_000_000) }
+        // After the opening scroll to the bottom (onAppear) has run.
+        await sleep(300)
+        var pages = 0
+        while !Task.isCancelled {
+            if let i = source.items.firstIndex(where: { $0.id == uuid || $0.id.hasPrefix(uuid + "-") }) {
+                let rows = source.items
+                let row = rows[i].id
+                window = max(window, rows.count - i + 4)
+                atBottom = false
+                await sleep(50)
+                // Bring its chunk near, so the row is built, then center the row.
+                let first = rows.count - min(window, rows.count)
+                if let chunk = TranscriptChunks.split(Array(rows[first...])).first(where: { $0.range.contains(i - first) }) {
+                    proxy.scrollTo(TranscriptChunks.scrollID(chunk.id), anchor: .top)
+                    await sleep(80)
+                }
+                proxy.scrollTo(row, anchor: .center)
+                withAnimation(.easeOut(duration: 0.2)) { highlighted = row }
+                // Text views settle their heights after the first layout pass.
+                await sleep(150)
+                proxy.scrollTo(row, anchor: .center)
+                await sleep(1800)
+                withAnimation(.easeOut(duration: 0.6)) { if highlighted == row { highlighted = nil } }
+                return
+            }
+            if source.loadingOlder {
+                await sleep(100)
+            } else if source.hasMore && pages < 40 {
+                pages += 1
+                await source.loadOlder()
+            } else {
+                return
             }
         }
     }
@@ -622,6 +683,8 @@ enum TranscriptChunks {
     /// A group starts at about one row in `average`, and is cut after `maximum`.
     static let average: UInt64 = 12
     static let maximum = 24
+
+    static func scrollID(_ chunk: String) -> String { "chunk:" + chunk }
 
     static func split(_ rows: [TranscriptItem]) -> [Chunk] {
         var out: [Chunk] = []

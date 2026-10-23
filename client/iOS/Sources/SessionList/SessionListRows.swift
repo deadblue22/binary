@@ -161,6 +161,36 @@ struct SubagentListRow: View {
     }
 }
 
+/// A message that matched the search, under its session; tapping it opens
+/// the session there.
+struct SnippetListRow: View {
+    let snippet: ContentHit.Snippet
+    let query: String
+    let depth: Int
+    let onOpen: () -> Void
+    @Environment(\.theme) private var theme
+
+    var body: some View {
+        Button(action: onOpen) {
+            HStack(alignment: .firstTextBaseline, spacing: 6) {
+                Image(systemName: snippet.role == "user" ? "person" : "sparkle")
+                    .font(.system(size: theme.size(.small) - 1))
+                    .foregroundStyle(theme.c.textFaint)
+                    .frame(width: 14)
+                Text(snippet.highlighted(query))
+                    .font(theme.font(.caption))
+                    .foregroundStyle(theme.c.textMuted)
+                    .lineLimit(2)
+                    .multilineTextAlignment(.leading)
+                Spacer(minLength: 0)
+            }
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(RowButtonStyle())
+        .padding(.leading, SessionListRow.indent(depth) + 26)
+    }
+}
+
 /// A list row's own tap feedback (a plain button in a List row has none).
 struct RowButtonStyle: ButtonStyle {
     func makeBody(configuration: Configuration) -> some View {

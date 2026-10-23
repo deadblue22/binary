@@ -7,6 +7,8 @@ struct SidebarNode: Identifiable {
     var children: [SidebarNode] = []
     var pinned = false
     var archived = false
+    /// What matched in its messages, in search results.
+    var hit: ContentHit?
     var id: SessionRef { ref }
 
     /// Pending approvals in nested sessions, shown on the parent.
@@ -136,8 +138,9 @@ struct RowPlace: Equatable {
 enum SidebarBuilder {
     static let recentWindow: TimeInterval = 3 * 86400
 
+    /// `hits`: sessions whose messages match `query` (ContentSearch), by id.
     static func build(_ conn: ServerConnection, org: SessionOrganizer, query: String,
-                      mirrors: MirrorIndex = MirrorIndex()) -> SidebarSection {
+                      mirrors: MirrorIndex = MirrorIndex(), hits: [String: ContentHit] = [:]) -> SidebarSection {
         let layout = org.layout(conn.id)
         let hidden = org.showMirrors ? [] : mirrors.hidden(on: conn.id)
         let all = hidden.isEmpty ? conn.sessions : conn.sessions.filter { !hidden.contains($0.key) }
@@ -153,7 +156,11 @@ enum SidebarBuilder {
 
         let q = query.trimmingCharacters(in: .whitespaces).lowercased()
         if !q.isEmpty {
-            section.flat = all.values.filter { matches($0, q) }.sorted(by: order).map(node)
+            section.flat = all.values.filter { matches($0, q) || hits[$0.id] != nil }.sorted(by: order).map {
+                var n = node($0)
+                n.hit = hits[$0.id]
+                return n
+            }
             return section
         }
         if org.filter == .archived {

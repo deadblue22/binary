@@ -207,7 +207,7 @@ function between(s: string, open: string, close: string): string {
 const CONTEXT_TAGS = ['system-reminder', 'artifact-view-context'];
 const CONTEXT_RE = new RegExp(`<(${CONTEXT_TAGS.join('|')})(?:\\s[^>]*)?>[\\s\\S]*?<\\/\\1>\\s*`, 'g');
 
-function stripContext(s: string): string {
+export function stripContext(s: string): string {
   return CONTEXT_TAGS.some((t) => s.includes(`<${t}`)) ? s.replace(CONTEXT_RE, '') : s;
 }
 

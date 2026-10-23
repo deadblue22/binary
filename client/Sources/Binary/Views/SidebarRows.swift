@@ -491,6 +491,41 @@ struct SubagentRow: View {
     }
 }
 
+/// A message that matched the search, under its session's row; clicking it
+/// opens the session there.
+struct SnippetRow: View {
+    let snippet: ContentHit.Snippet
+    let query: String
+    let action: () -> Void
+    @Environment(\.theme) private var theme
+    @State private var hover = false
+
+    var body: some View {
+        Button(action: action) {
+            HStack(alignment: .firstTextBaseline, spacing: 6) {
+                Image(systemName: snippet.role == "user" ? "person" : "sparkle")
+                    .font(.system(size: theme.size(.small) - 1))
+                    .foregroundStyle(theme.c.textFaint)
+                    .frame(width: 12)
+                Text(snippet.highlighted(query))
+                    .font(theme.font(.rowMeta))
+                    .foregroundStyle(hover ? theme.c.text : theme.c.textMuted)
+                    .lineLimit(2)
+                    .multilineTextAlignment(.leading)
+                Spacer(minLength: 0)
+            }
+            .padding(.leading, TreeMetrics.titleX - 18)
+            .padding(.trailing, 8)
+            .padding(.vertical, 3)
+            .background(RoundedRectangle(cornerRadius: theme.rowRadius, style: .continuous).fill(hover ? theme.c.hover : .clear))
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .onHover { hover = $0 }
+        .help(snippet.time.map { $0.formatted(Date.FormatStyle().month().day().hour().minute().locale(Format.locale)) } ?? "")
+    }
+}
+
 /// Says how many mirror copies a server hides, with a way to show them.
 struct HiddenMirrorsLine: View {
     let count: Int

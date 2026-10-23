@@ -314,6 +314,18 @@ final class ServerConnection: Identifiable {
         return try? await requireAPI().data("/sessions/\(session)/images/\(key)")
     }
 
+    /// Sessions whose messages contain every word of `query`. Empty from
+    /// servers without full-text search.
+    func searchContent(_ query: String) async throws -> [ContentHit] {
+        struct R: Decodable { var results: [ContentHit] }
+        do {
+            let r: R = try await requireAPI().get("/search", query: ["q": query, "limit": "200"])
+            return r.results
+        } catch let e as APIError where e.status == 404 {
+            return []
+        }
+    }
+
     func gitInfo(_ path: String) async -> GitInfo? {
         try? await requireAPI().get("/fs/git", query: ["path": path])
     }

@@ -9,6 +9,7 @@ struct SidebarView: View {
     /// Drop zones (group rows) currently under a drag, as "group|row" keys.
     @State private var dropHover: Set<String> = []
     @State private var query = ""
+    @State private var content = ContentSearch()
     @FocusState private var searchFocused: Bool
     @FocusState private var listFocused: Bool
     /// Rows picked with ⌘/⇧-click for batch actions.
@@ -22,7 +23,9 @@ struct SidebarView: View {
 
     var body: some View {
         let mirrors = MirrorIndex(store.orderedConnections)
-        let sections = store.orderedConnections.map { SidebarBuilder.build($0, org: org, query: query, mirrors: mirrors) }
+        let sections = store.orderedConnections.map {
+            SidebarBuilder.build($0, org: org, query: query, mirrors: mirrors, hits: content.hits(for: $0.id, query: query))
+        }
         let merged = SidebarBuilder.merge(sections, org: org)
         let order = SidebarBuilder.visibleOrder(sections, merged: merged, org: org, showAll: showAllAgents)
         VStack(spacing: 0) {
@@ -63,6 +66,18 @@ struct SidebarView: View {
         .onAppear { nav.visibleOrder = order }
         .onChange(of: order) { _, o in nav.visibleOrder = o }
         .onChange(of: nav.searchRequest) { _, _ in searchFocused = true }
+        .task(id: query) { await content.run(query, on: store.orderedConnections) }
+        .task {
+            guard let q = DebugHooks.env["BINARY_SEARCH"] else { return }
+            try? await Task.sleep(nanoseconds: 1_500_000_000)
+            query = q
+        }
+        .onChange(of: content.query) { _, _ in
+            guard DebugHooks.env["BINARY_OPEN_MATCH"] == "1",
+                  let n = sections.lazy.compactMap({ $0.flat?.first { $0.hit != nil } }).first,
+                  let sn = n.hit?.snippets.first else { return }
+            nav.open(n.ref, at: sn.uuid)
+        }
         // Kept out of this body so a selection change re-renders only the rows involved.
         .background(SelectionWatcher { s in
             if let s, redirectIfMirror(s) { return }
@@ -100,6 +115,9 @@ struct SidebarView: View {
                 PlainField(placeholder: tr("Search titles, folders, content, groups"), text: $query, focus: $searchFocused)
                     .foregroundStyle(theme.c.text)
                     .onExitCommand { query = ""; searchFocused = false }
+                if content.running {
+                    ProgressView().controlSize(.mini)
+                }
                 if !query.isEmpty {
                     Button { query = "" } label: { Image(systemName: "xmark.circle.fill") }
                         .buttonStyle(.plain)
@@ -410,6 +428,14 @@ struct SidebarView: View {
             .draggable(DragPayload.sessions(conn.id, targets(n.ref).map(\.session)).string) {
                 DragPreview(title: n.session.title, count: targets(n.ref).count)
             }
+            if let hit = n.hit {
+                ForEach(hit.snippets.prefix(2), id: \.uuid) { sn in
+                    SnippetRow(snippet: sn, query: query) {
+                        batch = []
+                        nav.open(n.ref, at: sn.uuid)
+                    }
+                }
+            }
             if expanded && expandable {
                 ForEach(Array(n.children.enumerated()), id: \.element.id) { i, c in
                     tree(c, conn: conn, position: TreePosition(depth: depth + 1, isLast: i == rowCount - 1, continues: childContinues))
@@ -482,7 +508,9 @@ struct SidebarView: View {
         // Open only what holds the row as the sidebar draws it: a session
         // pinned or grouped apart from its parent isn't under that parent.
         let mirrors = MirrorIndex(store.orderedConnections)
-        let sections = store.orderedConnections.map { SidebarBuilder.build($0, org: org, query: query, mirrors: mirrors) }
+        let sections = store.orderedConnections.map {
+            SidebarBuilder.build($0, org: org, query: query, mirrors: mirrors, hits: content.hits(for: $0.id, query: query))
+        }
         let place = SidebarBuilder.place(of: ref.sessionOnly, sections: sections, merged: SidebarBuilder.merge(sections, org: org))
         switch place?.area {
         case .pinned?:
