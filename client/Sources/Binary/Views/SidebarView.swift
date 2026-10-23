@@ -32,7 +32,11 @@ struct SidebarView: View {
             topBar(sections)
             ScrollViewReader { proxy in
                 ScrollView {
-                    LazyVStack(alignment: .leading, spacing: 2) {
+                    // Not lazy: a LazyVStack of these rows could keep placing
+                    // them again every frame after the list changed under the
+                    // pointer, hanging the app at full CPU. The list is a few
+                    // hundred rows at most, cheap to lay out in full.
+                    VStack(alignment: .leading, spacing: 2) {
                         if let merged { mergedView(merged) }
                         ForEach(sections) { section in
                             sectionView(section, mirrors: mirrors, merged: merged != nil)
