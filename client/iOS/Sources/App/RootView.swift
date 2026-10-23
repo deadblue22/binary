@@ -64,7 +64,9 @@ struct RootView: View {
     }
 
     /// Keeps a live controller for the open session, and for the subagent
-    /// pushed over it.
+    /// pushed over it. Going back stops a controller's stream but keeps it:
+    /// the screen sliding away still shows it (dropping it would turn that
+    /// screen into a spinner mid-animation), and opening it again resumes.
     private func select(_ ref: SessionRef?) {
         if ref != nil { nav.draft = nil }
         nav.showingInfo = false
@@ -73,28 +75,35 @@ struct RootView: View {
             nav.selection = live
             return
         }
-        let session = ref?.sessionOnly
-        if controller?.ref != session {
-            controller?.stop()
-            controller = nil
-            if let session, let conn = store.connection(session.server) {
-                let c = SessionController(conn: conn, id: session.session)
-                c.start()
-                controller = c
+        if let session = ref?.sessionOnly {
+            if controller?.ref == session {
+                controller?.start()
+            } else {
+                controller?.stop()
+                controller = nil
+                if let conn = store.connection(session.server) {
+                    let c = SessionController(conn: conn, id: session.session)
+                    c.start()
+                    controller = c
+                }
             }
+        } else {
+            controller?.stop()
         }
         if let ref, let id = ref.agent {
-            guard agent?.ref != ref else { return }
-            agent?.stop()
-            agent = nil
-            if let conn = store.connection(ref.server) {
-                let a = SubagentController(conn: conn, sessionID: ref.session, agentID: id)
-                a.start()
-                agent = a
+            if agent?.ref == ref {
+                agent?.start()
+            } else {
+                agent?.stop()
+                agent = nil
+                if let conn = store.connection(ref.server) {
+                    let a = SubagentController(conn: conn, sessionID: ref.session, agentID: id)
+                    a.start()
+                    agent = a
+                }
             }
         } else {
             agent?.stop()
-            agent = nil
         }
     }
 
@@ -103,10 +112,14 @@ struct RootView: View {
     /// from the background (iOS cut the connections).
     private func reconnect() {
         for c in store.orderedConnections { c.reconnect() }
-        controller?.stop()
-        controller?.start()
-        agent?.stop()
-        agent?.start()
+        if nav.selection != nil {
+            controller?.stop()
+            controller?.start()
+        }
+        if nav.selection?.agent != nil {
+            agent?.stop()
+            agent?.start()
+        }
     }
 
     private func phaseChanged(_ p: ScenePhase) {

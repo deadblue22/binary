@@ -89,6 +89,9 @@ final class SessionController {
                         return
                     }
                 }
+                // Stopped, not dropped: a controller kept to be reopened
+                // shouldn't come back showing a lost connection.
+                if Task.isCancelled { return }
                 self.connected = false
                 try? await Task.sleep(nanoseconds: delay * 1_000_000_000)
                 delay = min(delay * 2, 10)
