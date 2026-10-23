@@ -257,7 +257,8 @@ final class PasteCatcher {
         guard monitor == nil else { return }
         monitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
             guard let self, self.active,
-                  event.modifierFlags.intersection(.deviceIndependentFlagsMask) == .command,
+                  event.modifierFlags.intersection(.deviceIndependentFlagsMask)
+                      .subtracting([.capsLock, .numericPad, .function]) == .command,
                   event.charactersIgnoringModifiers?.lowercased() == "v" else { return event }
             let imgs = ImageProcessor.images(from: .general)
             guard !imgs.isEmpty else { return event }
