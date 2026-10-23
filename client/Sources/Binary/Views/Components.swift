@@ -486,6 +486,7 @@ final class ScrollerFixView: NSView {
 @MainActor
 final class ComposingWatcher {
     private var monitor: Any?
+    private var observer: NSObjectProtocol?
 
     func install(_ update: @escaping (Bool) -> Void) {
         guard monitor == nil else { return }
@@ -493,6 +494,17 @@ final class ComposingWatcher {
             // After the key is handled, the marked text reflects it.
             DispatchQueue.main.async { update(Self.composing(in: event.window)) }
             return event
+        }
+        // Dictation sets marked text without any key press; the field's
+        // storage still changes, so watch that too.
+        observer = NotificationCenter.default.addObserver(
+            forName: NSTextStorage.didProcessEditingNotification, object: nil, queue: .main
+        ) { note in
+            MainActor.assumeIsolated {
+                guard let view = NSApp.keyWindow?.firstResponder as? NSTextView,
+                      note.object as? NSTextStorage === view.textStorage else { return }
+                DispatchQueue.main.async { update(view.hasMarkedText()) }
+            }
         }
     }
 
@@ -502,7 +514,9 @@ final class ComposingWatcher {
 
     func remove() {
         if let monitor { NSEvent.removeMonitor(monitor) }
+        if let observer { NotificationCenter.default.removeObserver(observer) }
         monitor = nil
+        observer = nil
     }
 }
 #else
