@@ -103,16 +103,24 @@ final class PhoneNotifier: NSObject, UNUserNotificationCenterDelegate {
         UNUserNotificationCenter.current().setBadgeCount(total)
     }
 
-    nonisolated func userNotificationCenter(_ center: UNUserNotificationCenter, didReceive response: UNNotificationResponse) async {
+    // Completion-handler variants, not `async`: the async ones hand the
+    // completion back to UIKit from a cooperative-pool thread, and UIKit
+    // asserts it's on the main thread (opening a notification crashed).
+    nonisolated func userNotificationCenter(_ center: UNUserNotificationCenter, didReceive response: UNNotificationResponse, withCompletionHandler completionHandler: @escaping () -> Void) {
         let info = response.notification.request.content.userInfo
-        guard let server = (info["server"] as? String).flatMap(UUID.init(uuidString:)),
-              let session = info["session"] as? String else { return }
-        await MainActor.run {
-            self.nav?.selection = SessionRef(server: server, session: session)
+        let server = (info["server"] as? String).flatMap(UUID.init(uuidString:))
+        let session = info["session"] as? String
+        DispatchQueue.main.async {
+            MainActor.assumeIsolated {
+                if let server, let session {
+                    self.nav?.selection = SessionRef(server: server, session: session)
+                }
+            }
+            completionHandler()
         }
     }
 
-    nonisolated func userNotificationCenter(_ center: UNUserNotificationCenter, willPresent notification: UNNotification) async -> UNNotificationPresentationOptions {
-        [.banner, .sound]
+    nonisolated func userNotificationCenter(_ center: UNUserNotificationCenter, willPresent notification: UNNotification, withCompletionHandler completionHandler: @escaping (UNNotificationPresentationOptions) -> Void) {
+        DispatchQueue.main.async { completionHandler([.banner, .sound]) }
     }
 }
