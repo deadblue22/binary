@@ -42,6 +42,13 @@ struct ProjectGroup: Identifiable {
         while f.count > 1 && f.hasSuffix("/") { f.removeLast() }
         return f
     }
+
+    /// Every session of the project on its server, shown or not, to archive
+    /// the project as a whole.
+    @MainActor
+    func allSessions(on conn: ServerConnection) -> [SessionRef] {
+        conn.sessions.values.filter { Self.folder(of: $0.cwd) == folder }.map { SessionRef(server: server, session: $0.id) }
+    }
 }
 
 /// A session row in an area that spans servers.

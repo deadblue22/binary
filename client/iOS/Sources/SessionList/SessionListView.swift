@@ -245,6 +245,12 @@ struct SessionListView: View {
             if !p.folder.isEmpty {
                 Button { copy(p.folder) } label: { Label(tr("Copy Path"), systemImage: "doc.on.doc") }
             }
+            Divider()
+            Button {
+                let refs = p.allSessions(on: conn)
+                org.setArchived(refs, true)
+                notice = tr("Archived \(refs.count) sessions of \(p.name). Show → Archived lists them.")
+            } label: { Label(tr("Archive Project's Sessions"), systemImage: "archivebox") }
         }
         .listRowBackground(Color.clear)
         .listRowSeparator(.hidden)

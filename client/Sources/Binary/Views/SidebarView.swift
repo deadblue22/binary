@@ -418,10 +418,21 @@ struct SidebarView: View {
                 Divider()
             }
             Button(p.collapsed ? tr("Expand") : tr("Collapse"), action: toggle)
+            Divider()
+            Button(tr("Archive Project's Sessions")) { archive(p, conn) }
         }
         if !p.collapsed {
             ForEach(p.nodes) { n in tree(n, conn: conn) }
         }
+    }
+
+    /// Archives every session in the project, so it leaves the list; they
+    /// stay under Archived.
+    private func archive(_ p: ProjectGroup, _ conn: ServerConnection) {
+        let refs = p.allSessions(on: conn)
+        org.setArchived(refs, true)
+        batch = []
+        notice = tr("Archived \(refs.count) sessions of \(p.name). Show → Archived lists them.")
     }
 
     /// + on a project: a new session in its folder.
