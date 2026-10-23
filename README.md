@@ -50,18 +50,24 @@ To start the server at login (launchd on macOS, `systemd --user` on Linux; the c
 ./server/bin/binaryd service install
 ```
 
-Stop the running server before upgrading or rebuilding (`npm install` replaces dependencies it is using).
+Stop the running server before upgrading or rebuilding (`npm install` replaces dependencies it is using). After rebuilding (`npm run build` in `server`), restart the service when that interrupts nothing: this waits until no session binaryd runs has a turn in progress, background tasks or queued messages, listing what it waits for (`--timeout <minutes>` gives up instead of waiting indefinitely):
+
+```bash
+./server/bin/binaryd service restart --when-idle
+```
+
+A restart that does interrupt something gives running turns up to 30 seconds to end, and the next binaryd resumes what was still cut off, telling Claude so.
 
 ## Managing remote servers
 
 1. Install Node.js 20+ and Claude Code on the server, and sign in using Claude Code's own flow: run `claude` once to log in; on headless machines, use `claude setup-token` to create a long-lived token and set it as the `CLAUDE_CODE_OAUTH_TOKEN` environment variable. Binary never reads or stores these credentials.
-2. Deploy and install as a service (copies the source, runs `npm ci` on the server to install the platform's SDK and Claude Code, builds, installs the launchd / systemd service, and finally prints the token):
+2. Deploy and install as a service (copies the source, runs `npm ci` on the server to install the platform's SDK and Claude Code and builds, all next to the running version; then waits until a restart interrupts nothing, switches to the new version, installs or restarts the launchd / systemd service, and finally prints the token; `--now` skips the wait):
 
    ```bash
    server/scripts/deploy.sh devbox
    ```
 
-   It installs to `~/binaryd` on the server by default; a second argument picks another directory. Run it again to upgrade. To keep it running after you log out, run `sudo loginctl enable-linger $USER` on the server.
+   It installs to `~/binaryd` on the server by default; a second argument picks another directory. Run it again to upgrade; the previous version is kept as `~/binaryd.prev`. To keep it running after you log out, run `sudo loginctl enable-linger $USER` on the server.
 
 3. Connect. By default the server only listens on `127.0.0.1:7350`. **The token is equivalent to shell access on that machine; never expose it to the internet over plain HTTP.**
 

@@ -12,6 +12,7 @@ import { createHandler } from './api.js';
 import { bundledClaude, claudeVersion, cleanEnv } from './claude.js';
 import { homeDir, loadConfig, splitHostPort, type Config } from './config.js';
 import { defaultDesktopDir } from './desktop.js';
+import { waitIdle } from './idle.js';
 import { Manager } from './manager.js';
 import { preview } from './normalize.js';
 import { service } from './service.js';
@@ -33,7 +34,9 @@ Usage:
   binaryd token [flags]       print the URL and token for adding this server to Binary
   binaryd sessions [flags]    list sessions found on this machine
   binaryd service install     run binaryd at login (launchd on macOS, systemd --user on Linux)
+  binaryd service restart     restart it with the code on disk (--when-idle: first wait as wait-idle does)
   binaryd service uninstall
+  binaryd wait-idle           wait until no session binaryd runs has a turn, background task or queued message
   binaryd version
 
 Flags:
@@ -42,6 +45,8 @@ Flags:
   --claude <path>     Claude Code executable (default: the one bundled with the Agent SDK)
   --tls-cert <file>   TLS certificate (enables HTTPS together with --tls-key)
   --tls-key <file>    TLS key
+  --when-idle         service restart: wait until a restart interrupts nothing
+  --timeout <min>     wait-idle / --when-idle: give up after this many minutes (default: no limit)
 `;
 
 function log(msg: string): void {
@@ -141,6 +146,15 @@ async function printSessions(): Promise<void> {
   }
 }
 
+/** Waits for a moment a restart interrupts nothing; false after --timeout. */
+async function idle(cfg: Config, timeout: string | undefined): Promise<boolean> {
+  const minutes = timeout ? Number(timeout) : 0;
+  if (timeout && !(minutes > 0)) throw new Error(`--timeout takes minutes, got "${timeout}"`);
+  const ok = await waitIdle(cfg, { timeoutMs: minutes * 60_000 });
+  console.log(ok ? 'idle' : `still busy after ${minutes} min; giving up`);
+  return ok;
+}
+
 async function main(): Promise<void> {
   const argv = process.argv.slice(2);
   let cmd = 'serve';
@@ -155,6 +169,8 @@ async function main(): Promise<void> {
       claude: { type: 'string' },
       'tls-cert': { type: 'string' },
       'tls-key': { type: 'string' },
+      'when-idle': { type: 'boolean' },
+      timeout: { type: 'string' },
       help: { type: 'boolean', short: 'h' },
     },
     allowPositionals: false,
@@ -173,8 +189,12 @@ async function main(): Promise<void> {
       return printToken(setup(values));
     case 'sessions':
       return printSessions();
+    case 'wait-idle':
+      if (!(await idle(setup(values), values.timeout))) process.exit(1);
+      return;
     case 'service': {
       const cfg = setup(values);
+      if (action === 'restart' && values['when-idle'] && !(await idle(cfg, values.timeout))) process.exit(1);
       service(action, cfg.dir, fileURLToPath(import.meta.url));
       return;
     }

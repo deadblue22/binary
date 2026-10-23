@@ -3,7 +3,7 @@
 // tools it runs resolve like in a terminal.
 
 import { execFileSync } from 'node:child_process';
-import { mkdirSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { dirname, join } from 'node:path';
 
@@ -102,6 +102,20 @@ function launchdBootout(target: string): void {
   }
 }
 
+/** Whether a service file is missing or says something else than it would now. */
+function differs(path: string, text: string): boolean {
+  try {
+    return readFileSync(path, 'utf8') !== text;
+  } catch {
+    return true;
+  }
+}
+
+/**
+ * install: (re)writes the service file and (re)starts it. restart: restarts
+ * it with the code on disk now, rewriting the service file first only when it
+ * changed (on macOS that needs a full unload and load).
+ */
 export function service(action: string, home: string, script: string): void {
   const vars: ServiceVars = {
     node: process.execPath,
@@ -119,6 +133,10 @@ export function service(action: string, home: string, script: string): void {
       writeFileSync(plist, launchdPlist(vars));
       run('launchctl', ['bootstrap', domain, plist]);
       console.log(`installed ${plist}\nlogs: ${vars.log}`);
+    } else if (action === 'restart') {
+      if (differs(plist, launchdPlist(vars))) return service('install', home, script);
+      run('launchctl', ['kickstart', '-k', `${domain}/${LABEL}`]);
+      console.log('restarted');
     } else if (action === 'uninstall') {
       launchdBootout(`${domain}/${LABEL}`);
       rmSync(plist, { force: true });
@@ -136,6 +154,14 @@ export function service(action: string, home: string, script: string): void {
       run('systemctl', ['--user', 'restart', 'binaryd']); // pick up new code if it was running
       console.log(`installed ${unit}\nlogs: journalctl --user -u binaryd -f`);
       console.log('to keep it running after logout: sudo loginctl enable-linger $USER');
+    } else if (action === 'restart') {
+      if (!existsSync(unit)) return service('install', home, script);
+      if (differs(unit, systemdUnit(vars))) {
+        writeFileSync(unit, systemdUnit(vars));
+        run('systemctl', ['--user', 'daemon-reload']);
+      }
+      run('systemctl', ['--user', 'restart', 'binaryd']);
+      console.log('restarted');
     } else if (action === 'uninstall') {
       run('systemctl', ['--user', 'disable', '--now', 'binaryd'], false);
       rmSync(unit, { force: true });
