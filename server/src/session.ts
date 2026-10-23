@@ -205,6 +205,8 @@ export interface BackgroundTask {
   /** Housekeeping (watchers and the like), not activity. */
   ambient?: boolean;
   startedAt: string;
+  /** When it stops on its own (a monitor's timeout). */
+  endsAt?: string;
 }
 
 export class Session {

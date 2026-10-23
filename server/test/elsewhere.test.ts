@@ -75,6 +75,32 @@ test('busy only because of background tasks counts as idle', async () => {
   }
 });
 
+test('background tasks of a session open elsewhere are listed from its transcript', async () => {
+  const id = randomUUID();
+  const h = await harness({ agents: [{ pid: 1, cwd: '/x', kind: 'interactive', sessionId: id, status: 'busy', startedAt: hourAgo().getTime() - 60_000 }] });
+  try {
+    const u = randomUUID();
+    const call = { ...old(transcriptLine(id, h.cwd, randomUUID(), u, 'assistant', '')), message: { id: 'm1', model: 'fake-model', role: 'assistant', content: [{ type: 'tool_use', id: 'toolu_1', name: 'Monitor', input: { description: 'PR 12 CI', command: 'gh pr checks 12 --watch' } }] } };
+    const res = { ...old(transcriptLine(id, h.cwd, randomUUID(), u, 'user', '')), message: { role: 'user', content: [{ type: 'tool_result', tool_use_id: 'toolu_1', content: 'Monitor started' }] }, toolUseResult: { taskId: 'bmon1', persistent: true } };
+    const file = writeTranscript(h.configDir, h.cwd, id, [
+      old(transcriptLine(id, h.cwd, u, null, 'user', 'open the PR and wait for CI')),
+      call,
+      res,
+      old(transcriptLine(id, h.cwd, randomUUID(), u, 'assistant', 'Waiting for CI.')),
+    ]);
+    utimesSync(file, hourAgo(), hourAgo());
+    await h.manager.refreshList();
+    await h.manager.refreshAgents();
+    await waitFor('the monitor is listed', () => h.manager.summary(id)?.tasks?.length === 1);
+    const sum = h.manager.summary(id)!;
+    assert.equal(sum.external?.background, true);
+    assert.deepEqual(sum.tasks?.map((t) => [t.id, t.type, t.description]), [['bmon1', 'monitor', 'PR 12 CI']]);
+    assert.equal((sum.activity as { render(l: string): string }).render('en'), 'Open in another app, in the background: PR 12 CI');
+  } finally {
+    await h.close();
+  }
+});
+
 test('turns taken elsewhere make Binary restart its own process before sending', async () => {
   const h = await harness();
   try {

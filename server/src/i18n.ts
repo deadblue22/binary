@@ -21,6 +21,8 @@ const CATALOG = {
   externalBusy: 'Running in {holder}',
   externalOpen: 'Open in {holder}, idle',
   externalBackground: 'Open in {holder}, background task running',
+  externalBackgroundTask: 'Open in {holder}, in the background: {task}',
+  externalBackgroundTasks: 'Open in {holder}, {count} background tasks: {task}…',
   taskNotFound: 'That background task has already ended',
   queuedNotFound: 'That queued message was already sent or cancelled',
   holderDesktop: 'the Claude desktop app',

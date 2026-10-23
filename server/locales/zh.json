@@ -7,6 +7,8 @@
  "externalBusy": "正在{holder}中运行",
  "externalOpen": "在{holder}中打开，空闲",
  "externalBackground": "在{holder}中打开，后台任务运行中",
+ "externalBackgroundTask": "在{holder}中打开，后台：{task}",
+ "externalBackgroundTasks": "在{holder}中打开，{count} 个后台任务：{task} 等",
  "taskNotFound": "这个后台任务已经结束了",
  "queuedNotFound": "这条排队的消息已经发出或取消了",
  "holderDesktop": " Claude 桌面端",

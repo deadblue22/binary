@@ -22,6 +22,7 @@ import {
   type PermissionMode,
   type SDKSessionInfo,
 } from '@anthropic-ai/claude-agent-sdk';
+import { runningTasks } from './bgtasks.js';
 import { activeAgents, type ActiveAgent } from './claude.js';
 import type { Config } from './config.js';
 import { DesktopLinks } from './desktop.js';
@@ -206,6 +207,22 @@ function transcriptPath(id: string, cwd: string): string {
   return join(base, 'projects', cwd.replace(/[^a-zA-Z0-9]/g, '-'), `${id}.jsonl`);
 }
 
+/** A session's transcript, also when its folder is named after another directory. */
+function findTranscript(id: string, cwd: string): string {
+  const path = cwd ? transcriptPath(id, cwd) : '';
+  if (path && existsSync(path)) return path;
+  const projects = join(process.env.CLAUDE_CONFIG_DIR || join(homedir(), '.claude'), 'projects');
+  try {
+    for (const p of readdirSync(projects)) {
+      const f = join(projects, p, `${id}.jsonl`);
+      if (existsSync(f)) return f;
+    }
+  } catch {
+    // no projects folder
+  }
+  return '';
+}
+
 /** What Claude Code notes about a subagent in its `agent-<id>.meta.json`. */
 interface SubagentMeta {
   /** The name it was launched with (the Agent tool's `description`). */
@@ -276,7 +293,7 @@ export class Manager implements SessionHost, SessionToolHost {
   /** Which program holds each external claude process, by pid. */
   private holders = new Map<number, Holder>();
   /** For sessions busy elsewhere: whether the transcript shows the turn has ended. */
-  private turns = new Map<string, { stamp: string; ended: boolean; modified: number }>();
+  private turns = new Map<string, { stamp: string; ended: boolean; modified: number; tasks?: BackgroundTask[] }>();
   private lastTurnEnded = new Map<string, boolean>();
   private checkingTurns = new Set<string>();
   private draining = false;
@@ -485,7 +502,9 @@ export class Manager implements SessionHost, SessionToolHost {
         const last = msgs.findLast((m) => (m.type === 'user' || m.type === 'assistant') && !m.parent_tool_use_id);
         const content = last?.message?.content;
         const ended = last?.type === 'assistant' && Array.isArray(content) && !content.some((b) => (b as { type?: string }).type === 'tool_use');
-        this.turns.set(id, { stamp, ended, modified: info.lastModified });
+        // What keeps it busy once the turn is over: the process doesn't say, the transcript does.
+        const tasks = ended ? this.externalTasks(id, info.cwd ?? '') : undefined;
+        this.turns.set(id, { stamp, ended, modified: info.lastModified, ...(tasks?.length && { tasks }) });
         this.markDirty(id);
       }
       const ended = this.turnEnded(id);
@@ -498,6 +517,16 @@ export class Manager implements SessionHost, SessionToolHost {
       // unreadable for now; keep the last answer
     } finally {
       this.checkingTurns.delete(id);
+    }
+  }
+
+  private externalTasks(id: string, cwd: string): BackgroundTask[] {
+    const file = findTranscript(id, cwd);
+    if (!file) return [];
+    try {
+      return runningTasks(readFileSync(file, 'utf8'), this.agents.get(id)?.startedAt ?? 0);
+    } catch {
+      return [];
     }
   }
 
@@ -912,7 +941,18 @@ export class Manager implements SessionHost, SessionToolHost {
       const holder = this.holders.get(agent.pid) ?? 'other';
       sum.state = 'external';
       sum.external = { busy, ...(background && { background }), holder };
-      sum.activity = T(busy ? 'externalBusy' : background ? 'externalBackground' : 'externalOpen', { holder: T(HOLDER_TEXT[holder]) });
+      const now = new Date().toISOString();
+      const tasks = background ? (this.turns.get(id)?.tasks ?? []).filter((t) => !t.endsAt || t.endsAt > now) : [];
+      const holderText = T(HOLDER_TEXT[holder]);
+      if (tasks.length) {
+        sum.tasks = tasks;
+        const task = tasks.at(-1)!.description || tasks.at(-1)!.type;
+        sum.activity = tasks.length === 1
+          ? T('externalBackgroundTask', { holder: holderText, task })
+          : T('externalBackgroundTasks', { holder: holderText, task, count: tasks.length });
+      } else {
+        sum.activity = T(busy ? 'externalBusy' : background ? 'externalBackground' : 'externalOpen', { holder: holderText });
+      }
       if (busy && agent.startedAt) updated = Math.max(updated, agent.startedAt);
     }
     if (s?.queued.length) sum.queued = s.queued.map((q) => ({ id: q.id, text: preview(q.text, 200), images: q.images.length, at: q.at }));

@@ -381,7 +381,7 @@ struct SessionControls: View {
         HStack(spacing: 4) {
             modeMenu(text: d != .icons)
             Spacer(minLength: 8)
-            if let s = summary, s.shownState != .idle || s.live {
+            if let s = summary, s.shownState != .idle || s.live || !s.busyTasks.isEmpty {
                 let idle = s.shownState == .idle
                 let bg = s.busyTasks.count
                 let label = !idle ? s.statusText

@@ -28,7 +28,7 @@ struct SessionInspector: View {
             VStack(alignment: .leading, spacing: 12) {
                 if let s {
                     sessionCard(s)
-                    if s.live { processCard(s) }
+                    if s.live { processCard(s) } else if s.hold != nil && !(s.tasks ?? []).isEmpty { heldTasksCard(s) }
                     organizeCard(s)
                     usageCard(s)
                     tasksCard(s)
@@ -159,6 +159,21 @@ struct SessionInspector: View {
             .buttonStyle(.themed(.secondary, compact: true))
             .help(busy > 0 ? tr("Ends the process and its background tasks; the session can be resumed")
                   : tr("Ends the process; the session can be resumed"))
+        }
+    }
+
+    /// Background tasks of a process another program holds, as its transcript
+    /// tells them; only that program can stop them.
+    private func heldTasksCard(_ s: SessionSummary) -> some View {
+        let tasks = (s.tasks ?? []).sorted { ($0.startedAt ?? .distantPast) < ($1.startedAt ?? .distantPast) }
+        return InspectorCard(title: tr("Process"), trailing: tr("\(tasks.count) running")) {
+            ForEach(tasks) { t in BackgroundTaskRow(task: t, onStop: nil) }
+            if let x = s.hold {
+                Text(tr("Running in \(x.holderName); stop them there."))
+                    .font(theme.font(.caption))
+                    .foregroundStyle(theme.c.textMuted)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
         }
     }
 
@@ -491,7 +506,8 @@ private struct TaskRow: View {
 /// A background task: what it is, how long it has run, and a stop button.
 private struct BackgroundTaskRow: View {
     let task: BackgroundTask
-    let onStop: () -> Void
+    /// Absent when Binary can't stop it (another program runs it).
+    let onStop: (() -> Void)?
     @Environment(\.theme) private var theme
     @State private var hover = false
     @State private var stopping = false
@@ -534,16 +550,18 @@ private struct BackgroundTaskRow: View {
                     .lineLimit(1)
             }
             Spacer(minLength: 4)
-            Button {
-                stopping = true
-                onStop()
-            } label: {
-                if stopping { ProgressView().controlSize(.mini) } else { Image(systemName: "stop.fill") }
+            if let onStop {
+                Button {
+                    stopping = true
+                    onStop()
+                } label: {
+                    if stopping { ProgressView().controlSize(.mini) } else { Image(systemName: "stop.fill") }
+                }
+                .buttonStyle(.icon(size: 22))
+                .opacity(hover || stopping ? 1 : 0.35)
+                .disabled(stopping)
+                .help(tr("Stop this task"))
             }
-            .buttonStyle(.icon(size: 22))
-            .opacity(hover || stopping ? 1 : 0.35)
-            .disabled(stopping)
-            .help(tr("Stop this task"))
         }
         .padding(.vertical, 3)
         .contentShape(Rectangle())
