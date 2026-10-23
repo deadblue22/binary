@@ -1,3 +1,4 @@
+import AppKit
 import SwiftUI
 
 enum Format {
@@ -175,7 +176,7 @@ struct StatusDot: View {
     var body: some View {
         ZStack {
             if active {
-                PulseRing(color: fill)
+                PulseRing(color: fill).frame(width: 8, height: 8)
             }
             Circle()
                 .fill(fill)
@@ -198,25 +199,67 @@ struct StatusDot: View {
     }
 }
 
-/// The expanding ring around a running dot. The repeating animation is
-/// attached to this view only: started with withAnimation it leaked into
-/// every other change in the same update (the message box and freshly shown
-/// rows froze mid-animation until a scroll redrew them).
-private struct PulseRing: View {
+/// The expanding ring around a running dot, run as a Core Animation layer
+/// animation. A SwiftUI repeatForever animation made SwiftUI re-render the
+/// whole window every frame for as long as any session ran (a third of a
+/// core with a long sidebar); the render server animates a layer on its own.
+private struct PulseRing: NSViewRepresentable {
     let color: Color
-    @State private var expanded = false
 
-    var body: some View {
-        Circle()
-            .stroke(color.opacity(0.5), lineWidth: 1.5)
-            .frame(width: 8, height: 8)
-            .scaleEffect(expanded ? 2.1 : 1)
-            .opacity(expanded ? 0 : 1)
-            .animation(.easeOut(duration: 1.4).repeatForever(autoreverses: false), value: expanded)
-            .onAppear {
-                // Next runloop turn, outside the transaction that inserted the row.
-                DispatchQueue.main.async { expanded = true }
-            }
+    func makeNSView(context: Context) -> PulseRingView { PulseRingView() }
+
+    func updateNSView(_ view: PulseRingView, context: Context) {
+        view.color = NSColor(color).withAlphaComponent(0.5)
+    }
+}
+
+final class PulseRingView: NSView {
+    private let ring = CAShapeLayer()
+
+    var color: NSColor = .clear {
+        didSet { ring.strokeColor = color.cgColor }
+    }
+
+    override init(frame: NSRect) {
+        super.init(frame: frame)
+        wantsLayer = true
+        ring.fillColor = nil
+        ring.lineWidth = 1.5
+        ring.opacity = 0
+        layer?.addSublayer(ring)
+    }
+
+    required init?(coder: NSCoder) { fatalError() }
+
+    // Clicks and hovers go to the row underneath.
+    override func hitTest(_ point: NSPoint) -> NSView? { nil }
+
+    override func layout() {
+        super.layout()
+        CATransaction.begin()
+        CATransaction.setDisableActions(true)
+        ring.frame = bounds
+        ring.path = CGPath(ellipseIn: bounds.insetBy(dx: 0.75, dy: 0.75), transform: nil)
+        CATransaction.commit()
+    }
+
+    override func viewDidMoveToWindow() {
+        super.viewDidMoveToWindow()
+        ring.removeAllAnimations()
+        guard let window else { return }
+        ring.contentsScale = window.backingScaleFactor
+        let scale = CABasicAnimation(keyPath: "transform.scale")
+        scale.fromValue = 1
+        scale.toValue = 2.1
+        let fade = CABasicAnimation(keyPath: "opacity")
+        fade.fromValue = 1
+        fade.toValue = 0
+        let pulse = CAAnimationGroup()
+        pulse.animations = [scale, fade]
+        pulse.duration = 1.4
+        pulse.timingFunction = CAMediaTimingFunction(name: .easeOut)
+        pulse.repeatCount = .infinity
+        ring.add(pulse, forKey: "pulse")
     }
 }
 

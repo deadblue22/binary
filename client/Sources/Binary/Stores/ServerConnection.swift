@@ -26,7 +26,16 @@ final class ServerConnection: Identifiable {
     /// The account's plan usage on this server (5-hour and weekly windows).
     private(set) var usage: PlanUsage?
     @ObservationIgnored private var usageTask: Task<Void, Never>?
-    private(set) var sessions: [String: SessionSummary] = [:]
+    private(set) var sessions: [String: SessionSummary] = [:] {
+        didSet {
+            let names = Set(sessions.values.compactMap(\.group))
+            if names != groupNames { groupNames = names }
+        }
+    }
+    /// All group names in use on this server. Kept with the sessions: every
+    /// sidebar row's menu reads it, and rescanning per row made each sidebar
+    /// rebuild quadratic in the number of sessions.
+    private(set) var groupNames: Set<String> = []
     /// Subagent lists, loaded when a session is expanded or opened.
     private(set) var subagents: [String: [SubagentInfo]] = [:]
     /// False once the server answered a subagent request in a way that shows
@@ -54,6 +63,7 @@ final class ServerConnection: Identifiable {
         // The list as last seen, so the sidebar fills in before the server answers.
         if let saved = LocalCache.shared.sessions(server: config.id) {
             sessions = Dictionary(saved.map { ($0.id, $0) }, uniquingKeysWith: { a, _ in a })
+            groupNames = Set(saved.compactMap(\.group))  // didSet doesn't run in init
         }
     }
 
@@ -174,9 +184,6 @@ final class ServerConnection: Identifiable {
     func children(of id: String) -> [SessionSummary] {
         sessions.values.filter { $0.parentId == id && $0.id != id }
     }
-
-    /// All group names in use on this server.
-    var groupNames: Set<String> { Set(sessions.values.compactMap(\.group)) }
 
     // MARK: - API
 
