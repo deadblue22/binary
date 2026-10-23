@@ -110,8 +110,11 @@ struct TranscriptView<Source: TranscriptSource>: View {
                             ActivityRow(text: text, waiting: source.waitingForApproval)
                                 .padding(.top, rowGap)
                         }
+                        // The bottom margin is part of the marker, so scrolling to it
+                        // lands where the view opens (at the very end); with the margin
+                        // below it, every scroll to the bottom moved the rows by that much.
                         Color.clear
-                            .frame(height: 1)
+                            .frame(height: 23)
                             .id("bottom")
                             .onAppear { DebugHooks.mark("bottom visible") }
                             // Where the end of the transcript is: relative to the visible
@@ -124,7 +127,7 @@ struct TranscriptView<Source: TranscriptSource>: View {
                     }
                     .coordinateSpace(name: "transcriptContent")
                     .padding(.horizontal, theme.gutter)
-                    .padding(.vertical, 22)
+                    .padding(.top, 22)
                     .frame(maxWidth: theme.readingWidth, alignment: .leading)
                     .frame(maxWidth: .infinity)
                     // Short transcripts fill the view, pinned to the bottom like a chat.
