@@ -235,6 +235,13 @@ export class Session {
   private ownStamp = '';
   preview = '';
   lastActive = 0;
+  /**
+   * lastActive as of the last change the session list was told about. Most
+   * stream output (text deltas, tool progress) moves lastActive without
+   * telling the list, so a summary taken in between (a client opening the
+   * session) came out newer than the list's and moved the row.
+   */
+  listedActive = 0;
   lastExit = 0;
   /** User and assistant messages, as of the last time the log was read; kept after unload. */
   messageCount = 0;
@@ -581,7 +588,7 @@ export class Session {
       this.state = 'idle';
       this.activity = '';
     }
-    this.lastActive = Date.now();
+    this.lastActive = this.listedActive = Date.now();
     this.host.markDirty(this.id);
     // What the new process read; later changes not made by it came from elsewhere.
     this.ownStamp = await this.readStamp();
@@ -680,7 +687,7 @@ export class Session {
       this.activity = T('thinking');
     }
     this.errMsg = '';
-    this.lastActive = Date.now();
+    this.lastActive = this.listedActive = Date.now();
     this.host.markDirty(this.id);
   }
 
@@ -916,7 +923,10 @@ export class Session {
       default:
         dirty = false;
     }
-    if (dirty) this.host.markDirty(this.id);
+    if (dirty) {
+      this.listedActive = this.lastActive;
+      this.host.markDirty(this.id);
+    }
   }
 
   private toRunning(): void {

@@ -22,6 +22,16 @@ test('create, stream and merge with the stored transcript', async () => {
     await waitFor('first turn', () => s.state === 'idle' && s.log.entries.length >= 3);
     assert.deepEqual(lines(s), ['user text:hello', 'assistant text:echo: hello', 'result']);
 
+    // Output the session list isn't told about keeps the process from idling
+    // out, but leaves the listed time alone: a summary taken for a client
+    // opening the session matches the list's.
+    const listed = h.manager.summary(sum.id)!.updatedAt;
+    const active = s.lastActive;
+    await new Promise((r) => setTimeout(r, 5));
+    (s as unknown as { handle(m: unknown): void }).handle({ type: 'tool_progress' });
+    assert.ok(s.lastActive > active);
+    assert.equal(h.manager.summary(sum.id)!.updatedAt, listed);
+
     // The stored transcript holds the same messages under the same uuids.
     await h.manager.refreshList();
     const types = new Set(events.map((e) => e.type));

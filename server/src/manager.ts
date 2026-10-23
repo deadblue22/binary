@@ -878,7 +878,7 @@ export class Manager implements SessionHost, SessionToolHost {
 
     const cwd = this.cwdFor(id) || s?.cwd || '';
     const created = info?.createdAt ?? (rec?.createdAt ? Date.parse(rec.createdAt) : 0);
-    let updated = Math.max(info?.lastModified ?? 0, created || 0, s?.lastActive ?? 0);
+    let updated = Math.max(info?.lastModified ?? 0, created || 0, s?.listedActive ?? 0);
     const title =
       rec?.title?.trim() ||
       this.pendingTitles.get(id) ||
