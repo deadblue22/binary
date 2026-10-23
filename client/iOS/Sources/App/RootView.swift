@@ -110,8 +110,10 @@ struct RootView: View {
     /// Opens every stream again: after a language switch (the server words
     /// activity in the language a stream was opened with) or coming back
     /// from the background (iOS cut the connections).
-    private func reconnect() {
-        for c in store.orderedConnections { c.reconnect() }
+    private func reconnect(quietly: Bool = false) {
+        for c in store.orderedConnections {
+            if quietly { c.resume() } else { c.reconnect() }
+        }
         if nav.selection != nil {
             controller?.stop()
             controller?.start()
@@ -129,13 +131,14 @@ struct RootView: View {
             LocalCache.shared.flushAll()
             ComposerDrafts.shared.save()
             BackgroundGrace.shared.begin()
+            for c in store.orderedConnections { c.suspended = true }
             backgrounded = true
         case .active:
             BackgroundGrace.shared.end()
             PhoneNotifier.shared.updateBadge()
             if backgrounded {
                 backgrounded = false
-                reconnect()
+                reconnect(quietly: true)
             }
         default:
             break

@@ -51,6 +51,9 @@ final class ServerConnection: Identifiable {
     @ObservationIgnored var onLayout: ((ServerConnection, SharedLayout) -> Void)?
 
     @ObservationIgnored private var task: Task<Void, Never>?
+    /// The app is in the background (iOS), where the system cuts the stream:
+    /// that isn't shown as offline, `resume()` connects again quietly.
+    @ObservationIgnored var suspended = false
 
     init(config: ServerConfig) {
         self.config = config
@@ -102,7 +105,7 @@ final class ServerConnection: Identifiable {
                     return
                 } catch {
                     if Task.isCancelled { return }
-                    self.status = .offline(error.localizedDescription)
+                    if !self.suspended { self.status = .offline(error.localizedDescription) }
                 }
                 try? await Task.sleep(nanoseconds: delay * 1_000_000_000)
                 delay = min(delay * 2, 15)
@@ -126,6 +129,14 @@ final class ServerConnection: Identifiable {
     func reconnect() {
         stop()
         status = .connecting
+        start()
+    }
+
+    /// Back from the background: connects again keeping the status shown, so
+    /// the list doesn't blink offline and back. A failure still shows.
+    func resume() {
+        suspended = false
+        stop()
         start()
     }
 
