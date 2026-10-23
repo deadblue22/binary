@@ -296,7 +296,7 @@ struct SessionListView: View {
                     .tint(theme.c.textMuted)
                 }
                 .contextMenu { sessionMenu(n, conn) }
-                .compactRow()
+                .sessionRow(state: n.session.shownState, live: n.session.live, bottomSeparator: n.hit == nil)
                 .task(id: expanded && (n.session.subagentCount ?? 0) > 0 ? "\(n.session.id)|\(n.session.updatedAt.timeIntervalSince1970)" : "") {
                     guard expanded, (n.session.subagentCount ?? 0) > 0 else { return }
                     await conn.loadSubagents(n.session.id)
@@ -318,7 +318,7 @@ struct SessionListView: View {
                     .contextMenu {
                         Button { copy(a.id) } label: { Label(tr("Copy Subagent ID"), systemImage: "doc.on.doc") }
                     }
-                    .compactRow()
+                    .sessionRow(state: a.running == true ? .running : nil)
                 }
                 if canToggle {
                     Button {
@@ -329,7 +329,7 @@ struct SessionListView: View {
                              : tr("Show only the latest \(SidebarBuilder.agentPreview)"))
                             .font(theme.font(.caption))
                             .foregroundStyle(theme.c.focus)
-                            .padding(.leading, SessionListRow.indent(depth + 1) + 26)
+                            .padding(.leading, SessionListRow.indent(depth + 1) + 4)
                     }
                     .compactRow()
                 }
@@ -337,7 +337,7 @@ struct SessionListView: View {
                     Text(conn.supportsSubagents ? tr("Loading subagents…") : tr("This server can't list subagents"))
                         .font(theme.font(.caption))
                         .foregroundStyle(theme.c.textFaint)
-                        .padding(.leading, SessionListRow.indent(depth + 1) + 26)
+                        .padding(.leading, SessionListRow.indent(depth + 1) + 4)
                         .compactRow()
                 }
             }

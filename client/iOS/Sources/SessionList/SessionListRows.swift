@@ -1,9 +1,11 @@
 import SwiftUI
 
-/// One session in the list, on one line: status, title, time. What it's
-/// doing shows on a second line only while it works, waits or failed. Rows
-/// with child sessions or subagents have a count at the end that shows them
-/// nested below.
+/// One session in the list, always on two lines so the list doesn't shift
+/// as sessions start and stop: the title, then what it's doing (while it
+/// works, waits or failed) or its folder, branch and latest summary, with
+/// the time and counts at the end. Nested sessions take one line. Its state
+/// shows as a stripe on the screen's edge (`sessionRow`). Rows with child
+/// sessions or subagents have a count that shows them nested below.
 struct SessionListRow: View {
     let node: SidebarNode
     let depth: Int
@@ -18,83 +20,137 @@ struct SessionListRow: View {
     @Environment(\.theme) private var theme
 
     /// Leading inset of a row nested `depth` levels down.
-    static func indent(_ depth: Int) -> CGFloat { CGFloat(depth) * 16 }
+    static func indent(_ depth: Int) -> CGFloat { CGFloat(depth) * 6 }
+
+    /// Space above and below the text of a two-line row.
+    private static let padding: CGFloat = 11
 
     private var s: SessionSummary { node.session }
     /// Approvals waiting here, plus in nested sessions while they're hidden.
     private var pending: Int { s.pending + (expanded ? 0 : node.childPending) }
     private var subtasks: Int { node.children.count + (s.subagentCount ?? 0) }
+    private var nested: Bool { depth > 0 }
 
     var body: some View {
-        HStack(spacing: 6) {
-            Button(action: onOpen) {
-                HStack(alignment: .firstTextBaseline, spacing: 8) {
-                    if depth > 0 {
-                        Image(systemName: "arrow.turn.down.right")
-                            .font(.system(size: theme.size(.small)))
-                            .foregroundStyle(theme.c.textFaint)
-                    }
-                    StatusDot(state: s.shownState, live: s.live)
-                        .alignmentGuide(.firstTextBaseline) { $0[VerticalAlignment.center] + 4 }
-                    VStack(alignment: .leading, spacing: 1) {
-                        HStack(alignment: .firstTextBaseline, spacing: 5) {
-                            Text(s.title)
-                                .font(theme.font(.body).weight(pending > 0 ? .semibold : .regular))
-                                .foregroundStyle(theme.c.text)
-                                .lineLimit(1)
-                            if node.pinned { marker("pin.fill") }
-                            if node.archived { marker("archivebox") }
-                            if viewOnly { marker(s.sshHost == nil ? "eye" : "network") }
-                            Spacer(minLength: 4)
-                            if let serverTag {
-                                Text(serverTag)
-                                    .font(theme.font(.small))
-                                    .foregroundStyle(theme.c.textFaint)
-                                    .lineLimit(1)
-                                    .padding(.horizontal, 4)
-                                    .overlay(Capsule().strokeBorder(theme.c.border))
-                                    .fixedSize()
-                            }
-                            Text(Format.relative(s.updatedAt))
-                                .font(theme.font(.caption))
-                                .foregroundStyle(theme.c.textFaint)
-                                .fixedSize()
-                            if pending > 0 {
-                                CountBadge(count: pending, tint: theme.c.warning)
-                            }
-                        }
-                        if let detail {
-                            Text(detail)
-                                .font(theme.font(.caption))
-                                .foregroundStyle(detailColor)
-                                .lineLimit(1)
-                        }
-                    }
-                }
-                .contentShape(Rectangle())
+        Button(action: onOpen) {
+            Group {
+                if nested { oneLine } else { twoLines }
             }
-            .buttonStyle(RowButtonStyle())
+            .padding(.leading, Self.indent(depth))
+            .padding(.trailing, 12)
+            .padding(.vertical, nested ? 12 : Self.padding)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(RowButtonStyle())
+        // The count sits over its own placeholder in the row, with a tap
+        // area that reaches the row's bottom and the screen's edge.
+        .overlay(alignment: nested ? .trailing : .bottomTrailing) {
             if expandable {
                 Button(action: onToggle) {
-                    HStack(spacing: 2) {
-                        if subtasks > 0 { Text("\(subtasks)").monospacedDigit() }
-                        Image(systemName: expanded ? "chevron.up" : "chevron.down")
-                            .font(.system(size: theme.size(.small) - 1, weight: .semibold))
-                    }
-                    .font(theme.font(.small).weight(.medium))
-                    .foregroundStyle(expanded ? theme.c.focus : theme.c.textMuted)
-                    .padding(.horizontal, 6)
-                    .padding(.vertical, 3)
-                    .background(Capsule().fill(expanded ? theme.c.focus.opacity(0.14) : theme.c.surfaceAlt))
-                    .padding(.vertical, 4)
-                    .contentShape(Rectangle())
+                    subtaskCount
+                        .padding(.leading, 10)
+                        .padding(.trailing, 12)
+                        .padding(.top, nested ? 12 : 14)
+                        .padding(.bottom, nested ? 12 : Self.padding)
+                        .contentShape(Rectangle())
                 }
                 .buttonStyle(.borderless)
                 .accessibilityLabel(expanded ? tr("Collapse") : tr("Show subtasks"))
             }
         }
-        .padding(.leading, Self.indent(depth))
         .accessibilityElement(children: .contain)
+    }
+
+    private var twoLines: some View {
+        VStack(alignment: .leading, spacing: 3) {
+            HStack(spacing: 5) {
+                title(theme.font(.body))
+                Spacer(minLength: 0)
+            }
+            HStack(spacing: 6) {
+                if let serverTag {
+                    Text(serverTag)
+                        .font(theme.font(.small))
+                        .foregroundStyle(theme.c.textFaint)
+                        .lineLimit(1)
+                        .padding(.horizontal, 4)
+                        .overlay(Capsule().strokeBorder(theme.c.border))
+                        .fixedSize()
+                }
+                secondLine
+                    .font(theme.font(.caption))
+                    .lineLimit(1)
+                Spacer(minLength: 6)
+                ends
+            }
+        }
+    }
+
+    private var oneLine: some View {
+        HStack(spacing: 6) {
+            title(theme.font(.callout))
+            Spacer(minLength: 6)
+            ends
+        }
+    }
+
+    @ViewBuilder
+    private func title(_ font: Font) -> some View {
+        Text(s.title)
+            .font(font.weight(pending > 0 ? .semibold : .regular))
+            .foregroundStyle(theme.c.text)
+            .lineLimit(1)
+        if node.pinned { marker("pin.fill") }
+        if node.archived { marker("archivebox") }
+        if viewOnly { marker(s.sshHost == nil ? "eye" : "network") }
+    }
+
+    /// Time, approvals waiting, and room for the subtask count.
+    @ViewBuilder
+    private var ends: some View {
+        Text(Format.relative(s.updatedAt))
+            .font(theme.font(.caption))
+            .foregroundStyle(theme.c.textFaint)
+            .fixedSize()
+        if pending > 0 {
+            CountBadge(count: pending, tint: theme.c.warning)
+        }
+        if expandable {
+            subtaskCount.hidden()
+        }
+    }
+
+    private var subtaskCount: some View {
+        HStack(spacing: 2) {
+            if subtasks > 0 { Text("\(subtasks)").monospacedDigit() }
+            Image(systemName: expanded ? "chevron.up" : "chevron.down")
+                .font(.system(size: theme.size(.small) - 1, weight: .semibold))
+        }
+        .font(theme.font(.small).weight(.medium))
+        .foregroundStyle(expanded ? theme.c.focus : theme.c.textMuted)
+        .padding(.horizontal, 6)
+        .padding(.vertical, 3)
+        .background(Capsule().fill(expanded ? theme.c.focus.opacity(0.14) : theme.c.surfaceAlt))
+    }
+
+    @ViewBuilder
+    private var secondLine: some View {
+        if let detail {
+            Text(detail).foregroundStyle(detailColor)
+        } else if let summary = (s.lastSummary ?? s.preview).flatMap({ $0.isEmpty ? nil : $0 }) {
+            Text("\(Text(place).foregroundStyle(theme.c.textFaint)) · \(Text(summary).foregroundStyle(theme.c.textMuted))")
+                .foregroundStyle(theme.c.textFaint)
+        } else {
+            Text(place).foregroundStyle(theme.c.textFaint)
+        }
+    }
+
+    /// Folder and branch.
+    private var place: String {
+        let folder = s.project.isEmpty ? (s.cwd as NSString).lastPathComponent : s.project
+        guard let b = s.gitBranch, !b.isEmpty, b != "HEAD" else { return folder }
+        return folder + " · " + b
     }
 
     private func marker(_ icon: String) -> some View {
@@ -134,19 +190,15 @@ struct SubagentListRow: View {
 
     var body: some View {
         Button(action: onOpen) {
-            HStack(spacing: 8) {
-                Image(systemName: "arrow.turn.down.right")
+            HStack(spacing: 6) {
+                Image(systemName: "person.2.fill")
                     .font(.system(size: theme.size(.small)))
-                    .foregroundStyle(theme.c.textFaint)
-                IconTile(icon: "person.2.fill", tint: theme.c.external, size: 18)
-                if info.running == true {
-                    StatusDot(state: .running, live: true)
-                }
+                    .foregroundStyle(theme.c.external)
                 Text(info.title.flatMap { $0.isEmpty ? nil : $0 } ?? "Subagent")
                     .font(theme.font(.callout))
                     .foregroundStyle(theme.c.text)
                     .lineLimit(1)
-                Spacer(minLength: 4)
+                Spacer(minLength: 6)
                 if let d = info.updatedAt ?? info.startedAt {
                     Text(Format.relative(d))
                         .font(theme.font(.caption))
@@ -154,10 +206,12 @@ struct SubagentListRow: View {
                         .fixedSize()
                 }
             }
+            .padding(.leading, SessionListRow.indent(depth))
+            .padding(.trailing, 12)
+            .padding(.vertical, 12)
             .contentShape(Rectangle())
         }
         .buttonStyle(RowButtonStyle())
-        .padding(.leading, SessionListRow.indent(depth))
     }
 }
 
@@ -187,7 +241,7 @@ struct SnippetListRow: View {
             .contentShape(Rectangle())
         }
         .buttonStyle(RowButtonStyle())
-        .padding(.leading, SessionListRow.indent(depth) + 26)
+        .padding(.leading, SessionListRow.indent(depth) + 4)
     }
 }
 
@@ -198,7 +252,107 @@ struct RowButtonStyle: ButtonStyle {
     }
 }
 
+/// A session's state on the screen's edge: blue (pulsing) while it works,
+/// orange while it waits for you, red after an error, green while idle with
+/// its process still open, nothing when idle and closed.
+struct StatusStripe: View {
+    let state: SessionState?
+    var live = false
+    @Environment(\.theme) private var theme
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+    private var color: Color? {
+        switch state {
+        case nil: return nil
+        case .idle?: return live ? theme.c.success : nil
+        case let s?: return s.color(theme)
+        }
+    }
+
+    private var pulsing: Bool { !reduceMotion && (state == .running || state == .starting || state == .external) }
+
+    var body: some View {
+        HStack(spacing: 0) {
+            if let color {
+                Group {
+                    if pulsing {
+                        BreathingBar(color: color)
+                    } else {
+                        UnevenRoundedRectangle(bottomTrailingRadius: 2, topTrailingRadius: 2).fill(color)
+                    }
+                }
+                .frame(width: 4)
+                .padding(.vertical, 4)
+            }
+            Spacer(minLength: 0)
+        }
+        .accessibilityHidden(true)
+    }
+}
+
+/// The stripe of a working session, its opacity breathing in a Core
+/// Animation layer: a SwiftUI repeating animation would re-render the list
+/// every frame while anything runs (see `PulseRing`).
+private struct BreathingBar: UIViewRepresentable {
+    let color: Color
+
+    func makeUIView(context: Context) -> BreathingBarView { BreathingBarView() }
+
+    func updateUIView(_ view: BreathingBarView, context: Context) {
+        view.backgroundColor = UIColor(color)
+    }
+}
+
+final class BreathingBarView: UIView {
+    override init(frame: CGRect) {
+        super.init(frame: frame)
+        isUserInteractionEnabled = false
+        layer.cornerRadius = 2
+        layer.maskedCorners = [.layerMaxXMinYCorner, .layerMaxXMaxYCorner]
+    }
+
+    required init?(coder: NSCoder) { fatalError() }
+
+    override func didMoveToWindow() {
+        super.didMoveToWindow()
+        layer.removeAllAnimations()
+        guard window != nil else { return }
+        let breathe = CABasicAnimation(keyPath: "opacity")
+        breathe.fromValue = 1
+        breathe.toValue = 0.35
+        breathe.duration = 0.8
+        breathe.autoreverses = true
+        breathe.repeatCount = .infinity
+        breathe.timingFunction = CAMediaTimingFunction(name: .easeInEaseOut)
+        layer.add(breathe, forKey: "breathe")
+    }
+}
+
+/// A session or subagent row: edge to edge, with its state on the leading
+/// edge and hairlines between rows.
+private struct SessionRowStyle: ViewModifier {
+    let state: SessionState?
+    let live: Bool
+    let bottomSeparator: Bool
+    @Environment(\.theme) private var theme
+
+    func body(content: Content) -> some View {
+        content
+            .listRowInsets(EdgeInsets(top: 0, leading: 16, bottom: 0, trailing: 0))
+            .listRowBackground(StatusStripe(state: state, live: live))
+            .listRowSeparator(.visible, edges: .top)
+            .listRowSeparator(bottomSeparator ? .visible : .hidden, edges: .bottom)
+            .listRowSeparatorTint(theme.c.border)
+    }
+}
+
 extension View {
+    /// A session or subagent row; `bottomSeparator: false` keeps what
+    /// follows (search matches) attached to it.
+    func sessionRow(state: SessionState?, live: Bool = false, bottomSeparator: Bool = true) -> some View {
+        modifier(SessionRowStyle(state: state, live: live, bottomSeparator: bottomSeparator))
+    }
+
     /// Tight rows on the list's own background, like the Mac sidebar.
     func compactRow() -> some View {
         listRowInsets(EdgeInsets(top: 5, leading: 12, bottom: 5, trailing: 8))
