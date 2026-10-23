@@ -212,12 +212,25 @@ test('a session that changed directory midway still loads (transcript under its 
       join(agentDir, 'agent-abc123.jsonl'),
       JSON.stringify({ ...transcriptLine(id, moved, s1, null, 'user', 'subagent prompt'), isSidechain: true, agentId: 'abc123' }) + '\n',
     );
+    // A subagent with its launch name, which beats the prompt as a title.
+    writeFileSync(
+      join(agentDir, 'agent-def456.jsonl'),
+      JSON.stringify({ ...transcriptLine(id, moved, randomUUID(), null, 'user', 'second prompt'), isSidechain: true, agentId: 'def456' }) + '\n',
+    );
+    writeFileSync(join(agentDir, 'agent-def456.meta.json'), JSON.stringify({ agentType: 'Explore', description: 'Find the config' }));
     await h.manager.refreshList();
     const s = h.manager.session(id)!;
     await s.subscribe(0, '', () => true);
     assert.deepEqual(lines(s), ['user text:start here', 'assistant text:now in the worktree']);
     const subs = await h.manager.subagents(id);
-    assert.deepEqual(subs.map((a) => [a.id, a.title, a.prompt]), [['abc123', 'subagent prompt', 'subagent prompt']]);
+    assert.deepEqual(
+      subs.map((a) => [a.id, a.title, a.prompt, a.running]).sort(),
+      [
+        // Not running: no claude process holds the session.
+        ['abc123', 'subagent prompt', 'subagent prompt', undefined],
+        ['def456', 'Find the config', 'second prompt', undefined],
+      ],
+    );
     assert.ok(subs[0].updatedAt && subs[0].updatedAt === subs[0].startedAt, JSON.stringify(subs[0]));
   } finally {
     await h.close();

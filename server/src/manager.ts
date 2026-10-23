@@ -3,7 +3,7 @@
 // Session objects and fans out list changes.
 
 import { randomUUID } from 'node:crypto';
-import { existsSync, realpathSync, statSync } from 'node:fs';
+import { existsSync, readdirSync, readFileSync, realpathSync, statSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { basename, isAbsolute, join, resolve } from 'node:path';
 import {
@@ -131,6 +131,8 @@ export interface SubagentInfo {
   startedAt?: string;
   /** Time of its latest entry. */
   updatedAt?: string;
+  /** Still working: its session has a claude process and it hasn't finished. */
+  running?: boolean;
 }
 
 /** An error with an HTTP status and a localizable message. */
@@ -203,6 +205,69 @@ function transcriptPath(id: string, cwd: string): string {
   const base = process.env.CLAUDE_CONFIG_DIR || join(homedir(), '.claude');
   return join(base, 'projects', cwd.replace(/[^a-zA-Z0-9]/g, '-'), `${id}.jsonl`);
 }
+
+/** What Claude Code notes about a subagent in its `agent-<id>.meta.json`. */
+interface SubagentMeta {
+  /** The name it was launched with (the Agent tool's `description`). */
+  description?: string;
+  /** Set when it completes (newer Claude Code). */
+  finished?: boolean;
+  stoppedByUser?: boolean;
+}
+
+/**
+ * The meta files Claude Code writes beside subagent transcripts, by agent id.
+ * The session's folder is found by id: it is named after the directory the
+ * session started in, which may not be its cwd now.
+ */
+function subagentMetas(id: string, cwd: string): Map<string, SubagentMeta> {
+  const projects = join(process.env.CLAUDE_CONFIG_DIR || join(homedir(), '.claude'), 'projects');
+  let dir = join(transcriptPath(id, cwd).slice(0, -'.jsonl'.length), 'subagents');
+  if (!cwd || !existsSync(dir)) {
+    let found = '';
+    try {
+      for (const p of readdirSync(projects)) {
+        const d = join(projects, p, id, 'subagents');
+        if (existsSync(d)) {
+          found = d;
+          break;
+        }
+      }
+    } catch {
+      // no projects folder
+    }
+    dir = found;
+  }
+  const out = new Map<string, SubagentMeta>();
+  if (!dir) return out;
+  let files: string[] = [];
+  try {
+    files = readdirSync(dir);
+  } catch {
+    return out;
+  }
+  for (const f of files) {
+    const m = /^agent-(.+)\.meta\.json$/.exec(f);
+    if (!m) continue;
+    try {
+      const raw = JSON.parse(readFileSync(join(dir, f), 'utf8')) as Record<string, unknown>;
+      const meta: SubagentMeta = {};
+      if (typeof raw.description === 'string' && raw.description.trim()) meta.description = raw.description.trim();
+      if (raw.finished === true) meta.finished = true;
+      if (raw.stoppedByUser === true) meta.stoppedByUser = true;
+      out.set(m[1]!, meta);
+    } catch {
+      // unreadable or half-written
+    }
+  }
+  return out;
+}
+
+/**
+ * How long a subagent with no `finished` mark may go without writing and still
+ * count as running: older Claude Code never marks one finished.
+ */
+const SUBAGENT_QUIET_MS = 30 * 60_000;
 
 export class Manager implements SessionHost, SessionToolHost {
   private sessions = new Map<string, Session>();
@@ -1029,6 +1094,9 @@ export class Manager implements SessionHost, SessionToolHost {
     const s = this.session(id);
     if (!s) throw new HttpError(404, T('sessionNotFound'));
     const ids = await listSubagents(id).catch(() => [] as string[]);
+    const metas = ids.length ? subagentMetas(id, this.cwdFor(id) || s.cwd) : new Map<string, SubagentMeta>();
+    // Only a claude process on the session (ours or another program's) runs its subagents.
+    const alive = s.live || this.agents.has(id);
     const out: SubagentInfo[] = [];
     for (const agentId of ids) {
       const msgs = (await getSubagentMessages(id, agentId).catch(() => [])) as unknown as RawMessage[];
@@ -1036,14 +1104,21 @@ export class Manager implements SessionHost, SessionToolHost {
       const firstText = entries.find((e) => e.kind === 'user' && typeof e.blocks?.[0]?.text === 'string')?.blocks?.[0]?.text;
       const prompt = typeof firstText === 'string' ? firstText : '';
       const last = entries.findLast((e) => e.time)?.time;
+      const meta = metas.get(agentId);
+      const running =
+        alive &&
+        !meta?.finished &&
+        !meta?.stoppedByUser &&
+        (s.tasks.has(agentId) || (!!last && Date.now() - Date.parse(last) < SUBAGENT_QUIET_MS));
       out.push({
         id: agentId,
-        title: preview(prompt || agentId, 80),
+        title: meta?.description || preview(prompt || agentId, 80),
         // Lets clients match a Task/Agent tool call to its subagent exactly.
         ...(prompt && { prompt: prompt.slice(0, 4000) }),
         entries: entries.length,
         ...(entries[0]?.time && { startedAt: entries[0].time }),
         ...(last && { updatedAt: last }),
+        ...(running && { running }),
       });
     }
     return out.sort((a, b) => (a.startedAt ?? '').localeCompare(b.startedAt ?? ''));

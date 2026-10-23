@@ -242,6 +242,8 @@ struct SubagentInfo: Decodable, Identifiable, Hashable, Sendable {
     var updatedAt: Date?
     /// The full prompt the subagent got (newer servers, up to 4000 chars).
     var prompt: String?
+    /// Still working (newer servers).
+    var running: Bool?
 }
 
 struct SubagentsResponse: Decodable { var subagents: [SubagentInfo] }

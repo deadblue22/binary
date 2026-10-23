@@ -139,6 +139,9 @@ struct SubagentListRow: View {
                     .font(.system(size: theme.size(.small)))
                     .foregroundStyle(theme.c.textFaint)
                 IconTile(icon: "person.2.fill", tint: theme.c.external, size: 18)
+                if info.running == true {
+                    StatusDot(state: .running, live: true)
+                }
                 Text(info.title.flatMap { $0.isEmpty ? nil : $0 } ?? "Subagent")
                     .font(theme.font(.callout))
                     .foregroundStyle(theme.c.text)

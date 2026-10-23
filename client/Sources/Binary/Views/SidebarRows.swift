@@ -465,6 +465,9 @@ struct SubagentRow: View {
             Image(systemName: "person.2")
                 .font(.system(size: theme.size(.small) - 1))
                 .foregroundStyle(selected ? theme.c.selectionText.opacity(0.7) : theme.c.textFaint.opacity(0.8))
+            if info.running == true {
+                StatusDot(state: .running, live: true)
+            }
         }
         .padding(.vertical, 4)
         .padding(.trailing, 8)

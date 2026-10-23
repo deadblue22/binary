@@ -245,7 +245,9 @@ struct SessionInspector: View {
                     }
                 }
                 ForEach(agents) { a in
-                    TaskRow(icon: "person.2.fill", title: a.title.flatMap { $0.isEmpty ? nil : $0 } ?? "Subagent",
+                    // A running one shows the pulsing dot in place of its icon.
+                    TaskRow(icon: a.running == true ? nil : "person.2.fill", state: .running, live: true,
+                            title: a.title.flatMap { $0.isEmpty ? nil : $0 } ?? "Subagent",
                             detail: [(a.updatedAt ?? a.startedAt).map { Format.relative($0) }, a.entries.map { tr("\($0) entries") }]
                                 .compactMap { $0 }.joined(separator: " · "),
                             selected: currentAgent == a.id) {
