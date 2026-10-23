@@ -95,6 +95,10 @@ struct SessionListView: View {
                 Picker(tr("Show"), selection: Binding(get: { org.filter }, set: { org.filter = $0 })) {
                     ForEach(SessionFilter.allCases) { f in Text(f.label).tag(f) }
                 }
+                Picker(tr("Group By"), selection: Binding(get: { org.grouping }, set: { org.grouping = $0 })) {
+                    ForEach(SessionGrouping.allCases) { g in Text(g.label).tag(g) }
+                }
+                .pickerStyle(.menu)
                 Picker(tr("Sort"), selection: Binding(get: { org.sort }, set: { org.sort = $0 })) {
                     ForEach(SessionSort.allCases) { s in Text(s.label).tag(s) }
                 }
@@ -109,7 +113,7 @@ struct SessionListView: View {
                 Button(tr("Group Order…")) { orderingGroups = true }
                     .disabled(store.orderedConnections.allSatisfy { $0.groupNames.isEmpty } && org.groupOrder.isEmpty)
             } label: {
-                Label(tr("Show and Sort"), systemImage: org.filter == .recent && org.sort == .updated
+                Label(tr("Show and Sort"), systemImage: org.filter == .recent && org.sort == .updated && org.grouping == .groups
                       ? "line.3.horizontal.decrease.circle" : "line.3.horizontal.decrease.circle.fill")
             }
             Button { nav.newSession() } label: {
@@ -201,8 +205,9 @@ struct SessionListView: View {
                         ForEach(g.nodes) { n in tree(n, conn: conn) }
                     }
                 }
+                ForEach(section.projects) { p in projectRows(p, conn: conn) }
                 ForEach(section.ungrouped) { n in tree(n, conn: conn) }
-                if (merged ? section.ungrouped.isEmpty : section.isEmpty), conn.status == .online {
+                if (merged ? section.ungrouped.isEmpty && section.projects.isEmpty : section.isEmpty), conn.status == .online {
                     EmptyLine(text: org.filter == .recent ? tr("No activity in the last 3 days") : tr("No sessions"))
                 }
             }
@@ -228,6 +233,30 @@ struct SessionListView: View {
                 }
             }
         }
+    }
+
+    /// A project inside its server's section (lists don't nest sections):
+    /// a folding title row, then its sessions.
+    @ViewBuilder
+    private func projectRows(_ p: ProjectGroup, conn: ServerConnection) -> some View {
+        let toggle = { withAnimation(.easeOut(duration: 0.15)) { org.setProjectCollapsed(p.id, !p.collapsed) } }
+        SectionTitle(icon: "folder", title: p.name, count: p.nodes.count, expanded: !p.collapsed, onToggle: toggle) {
+            Button { newSession(in: p) } label: { Label(tr("New Session in Project"), systemImage: "square.and.pencil") }
+            if !p.folder.isEmpty {
+                Button { copy(p.folder) } label: { Label(tr("Copy Path"), systemImage: "doc.on.doc") }
+            }
+        }
+        .listRowBackground(Color.clear)
+        .listRowSeparator(.hidden)
+        if !p.collapsed {
+            ForEach(p.nodes) { n in tree(n, conn: conn) }
+        }
+    }
+
+    /// A project's New Session: in its folder.
+    private func newSession(in p: ProjectGroup) {
+        let latest = p.nodes.max { $0.session.updatedAt < $1.session.updatedAt }?.ref
+        nav.newSession(template: latest, folder: p.folder.isEmpty ? nil : p.folder)
     }
 
     /// Server names on rows only when there is more than one server.

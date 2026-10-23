@@ -218,6 +218,51 @@ struct GroupHeader<MenuContent: View>: View {
     }
 }
 
+/// A project's header when grouping by project: like a group's, but its
+/// members come from their folder, so nothing is dragged onto it.
+struct ProjectHeader<MenuContent: View>: View {
+    let name: String
+    let folder: String
+    let count: Int
+    let collapsed: Bool
+    var onNew: (() -> Void)? = nil
+    let onToggle: () -> Void
+    @ViewBuilder let menu: () -> MenuContent
+    @Environment(\.theme) private var theme
+    @State private var hover = false
+
+    var body: some View {
+        HStack(spacing: 6) {
+            Chevron(expanded: !collapsed)
+                .frame(width: 14)
+            Text(name)
+                .font(theme.font(.callout).weight(.semibold))
+                .foregroundStyle(theme.c.text)
+                .lineLimit(1)
+            Spacer(minLength: 4)
+            if let onNew {
+                AddButton(action: onNew, rowHover: hover)
+                    .help(tr("New Session in \(name)"))
+            }
+            CountBadge(count: count)
+        }
+        .padding(.horizontal, 6)
+        .padding(.vertical, 5)
+        .background(
+            RoundedRectangle(cornerRadius: theme.rowRadius, style: .continuous)
+                .fill(hover ? theme.c.hover : .clear)
+        )
+        .padding(.top, 4)
+        .contentShape(Rectangle())
+        .help(folder)
+        .onHover { hover = $0 }
+        .onTapGesture(perform: onToggle)
+        .contextMenu { menu() }
+        .accessibilityAddTraits(.isButton)
+        .accessibilityLabel(tr("Project \(name), \(count) sessions, \(collapsed ? tr("collapsed") : tr("expanded"))"))
+    }
+}
+
 /// Geometry shared by rows so nested rows line up under their parent.
 enum TreeMetrics {
     /// A top-level row's title starts here (padding + chevron + dot).

@@ -6,6 +6,8 @@ struct NewSessionDraft: Equatable {
     var parent: SessionRef?
     var group: String?
     var template: SessionRef?
+    /// A project's +: start in this folder on `template`'s server instead.
+    var folder: String?
 }
 
 struct TranscriptJump: Equatable {
@@ -28,9 +30,10 @@ final class Navigation {
     var showingInfo = false
 
     /// Opens a blank session: in `group`, starting from `template`'s folder
-    /// (a group's +), or as a child of `parent`.
-    func newSession(parent: SessionRef? = nil, group: String? = nil, template: SessionRef? = nil) {
-        draft = NewSessionDraft(serial: (draft?.serial ?? 0) + 1, parent: parent?.sessionOnly, group: group, template: template)
+    /// (a group's +) or from `folder` on its server (a project's +), or as a
+    /// child of `parent`.
+    func newSession(parent: SessionRef? = nil, group: String? = nil, template: SessionRef? = nil, folder: String? = nil) {
+        draft = NewSessionDraft(serial: (draft?.serial ?? 0) + 1, parent: parent?.sessionOnly, group: group, template: template, folder: folder)
         selection = nil
     }
 

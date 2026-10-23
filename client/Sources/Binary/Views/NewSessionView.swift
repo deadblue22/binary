@@ -401,8 +401,8 @@ struct NewSessionView: View {
             pick(server: r.server, p.cwd)
             group = p.group ?? group
         } else if let t = draft.template, let ts = store.connection(t.server)?.sessions[t.session] {
-            // A group's +: the folder of its latest session.
-            pick(server: t.server, ts.cwd)
+            // A group's +: the folder of its latest session; a project's: the project's.
+            pick(server: t.server, draft.folder ?? ts.cwd)
         } else if let last = projects.lastTarget, store.connection(last.server) != nil {
             if let p = projects.project(last.project) { choose(p) } else { pickFolder(server: last.server, last.folder) }
         } else if let p = store.orderedConnections.lazy.compactMap({ c in self.projects.projects(on: c.id).first }).first {

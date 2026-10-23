@@ -137,6 +137,10 @@ struct SidebarView: View {
                 }
                 .pickerStyle(.inline)
                 Toggle(tr("Show Copies from Other Servers"), isOn: Binding(get: { org.showMirrors }, set: { org.showMirrors = $0 }))
+                Picker(tr("Group By"), selection: Binding(get: { org.grouping }, set: { org.grouping = $0 })) {
+                    ForEach(SessionGrouping.allCases) { g in Text(g.label).tag(g) }
+                }
+                .pickerStyle(.inline)
                 Picker(tr("Sort"), selection: Binding(get: { org.sort }, set: { org.sort = $0 })) {
                     ForEach(SessionSort.allCases) { s in Text(s.label).tag(s) }
                 }
@@ -146,15 +150,17 @@ struct SidebarView: View {
                     Button(tr("New Group…")) { ask(.newGroup(first.id, [])) }
                 }
             } label: {
-                Image(systemName: org.filter == .recent && org.sort == .updated
-                      ? "line.3.horizontal.decrease.circle" : "line.3.horizontal.decrease.circle.fill")
+                let plain = org.filter == .recent && org.sort == .updated && org.grouping == .groups
+                Image(systemName: plain ? "line.3.horizontal.decrease.circle" : "line.3.horizontal.decrease.circle.fill")
                     .font(.system(size: theme.size(.body) + 2))
-                    .foregroundStyle(org.filter == .recent && org.sort == .updated ? theme.c.textMuted : theme.c.focus)
+                    .foregroundStyle(plain ? theme.c.textMuted : theme.c.focus)
             }
             .menuStyle(.borderlessButton)
             .menuIndicator(.hidden)
             .fixedSize()
-            .help(tr("Showing \(org.filter.label) · sorted by \(org.sort.label)"))
+            .help(org.grouping == .project
+                  ? tr("Showing \(org.filter.label) · by project · sorted by \(org.sort.label)")
+                  : tr("Showing \(org.filter.label) · sorted by \(org.sort.label)"))
         }
         .padding(.horizontal, 10)
         .padding(.top, 6)
@@ -385,8 +391,9 @@ struct SidebarView: View {
                     drop($0, conn) { refs in move(refs, to: "") }
                 }
             }
+            ForEach(section.projects) { p in projectView(p, conn: conn) }
             ForEach(section.ungrouped) { n in tree(n, conn: conn) }
-            if (merged ? section.ungrouped.isEmpty : section.isEmpty), conn.status == .online {
+            if (merged ? section.ungrouped.isEmpty && section.projects.isEmpty : section.isEmpty), conn.status == .online {
                 emptyLine(org.filter == .recent ? tr("No activity in the last 3 days") : tr("No sessions"))
             }
         }
@@ -394,6 +401,33 @@ struct SidebarView: View {
             let hosts = Set(hiddenMirrors.compactMap { mirrors.target[conn.id]?[$0] }).compactMap { store.connection($0)?.displayName }.sorted()
             HiddenMirrorsLine(count: hiddenMirrors.count, hosts: hosts) { org.showMirrors = true }
         }
+    }
+
+    @ViewBuilder
+    private func projectView(_ p: ProjectGroup, conn: ServerConnection) -> some View {
+        let toggle = { org.setProjectCollapsed(p.id, !p.collapsed) }
+        ProjectHeader(name: p.name, folder: p.folder, count: p.nodes.count, collapsed: p.collapsed,
+                      onNew: { newSession(in: p) }, onToggle: toggle) {
+            Button(tr("New Session in Project")) { newSession(in: p) }
+            Divider()
+            if !p.folder.isEmpty {
+                Button(tr("Copy Path")) { copy(p.folder) }
+                if conn.isLocal {
+                    Button(tr("Show in Finder")) { NSWorkspace.shared.selectFile(nil, inFileViewerRootedAtPath: p.folder) }
+                }
+                Divider()
+            }
+            Button(p.collapsed ? tr("Expand") : tr("Collapse"), action: toggle)
+        }
+        if !p.collapsed {
+            ForEach(p.nodes) { n in tree(n, conn: conn) }
+        }
+    }
+
+    /// + on a project: a new session in its folder.
+    private func newSession(in p: ProjectGroup) {
+        let latest = p.nodes.max { $0.session.updatedAt < $1.session.updatedAt }?.ref
+        nav.newSession(template: latest, folder: p.folder.isEmpty ? nil : p.folder)
     }
 
     private func emptyLine(_ text: String) -> some View {
@@ -521,6 +555,15 @@ struct SidebarView: View {
         case .group(let g)?:
             if org.isCollapsed(ref.server, g) {
                 org.toggleCollapsed(ref.server, g)
+                opened = true
+            }
+        case .project(let id)?:
+            if org.isServerCollapsed(ref.server) {
+                org.setServerCollapsed(ref.server, false)
+                opened = true
+            }
+            if org.isProjectCollapsed(id) {
+                org.setProjectCollapsed(id, false)
                 opened = true
             }
         case .server(foldable: true)?:

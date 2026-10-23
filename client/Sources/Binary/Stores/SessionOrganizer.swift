@@ -15,6 +15,20 @@ enum SessionSort: String, Codable, CaseIterable, Identifiable, Sendable {
     }
 }
 
+/// What the list's sections are: the groups made by hand (session tags),
+/// or one section per project folder on each server.
+enum SessionGrouping: String, Codable, CaseIterable, Identifiable, Sendable {
+    case groups, project
+    var id: String { rawValue }
+
+    var label: String {
+        switch self {
+        case .groups: return tr("My Groups")
+        case .project: return tr("Project")
+        }
+    }
+}
+
 enum SessionFilter: String, Codable, CaseIterable, Identifiable, Sendable {
     case recent, all, archived
     var id: String { rawValue }
@@ -61,7 +75,7 @@ struct ServerLayout: Codable, Equatable, Sendable {
     }
 }
 
-/// Pinned, archived, group order, collapsed state, sort and filter. Persisted
+/// Pinned, archived, group order, collapsed state, sort, filter and grouping. Persisted
 /// to sidebar.json next to servers.json; pinned, archived and the group order
 /// are also kept on newer servers, so every client shows the same (newest
 /// change wins, field by field).
@@ -72,6 +86,7 @@ final class SessionOrganizer {
     private(set) var layouts: [UUID: ServerLayout] = [:]
     var sort: SessionSort = .updated { didSet { save() } }
     var filter: SessionFilter = .recent { didSet { save() } }
+    var grouping: SessionGrouping = .groups { didSet { save() } }
     /// Show This Mac's view-only copies of sessions another server runs.
     var showMirrors = false { didSet { save() } }
     /// Groups span servers: one display order and folded state for a name,
@@ -81,6 +96,8 @@ final class SessionOrganizer {
     @ObservationIgnored private var groupOrderAt: Double = 0
     private(set) var collapsedGroups: Set<String> = []
     var pinnedCollapsed = false { didSet { save() } }
+    /// Folded project sections, as `ProjectKey.id` (server and folder).
+    private(set) var collapsedProjects: Set<String> = []
 
     @ObservationIgnored private var loading = false
     @ObservationIgnored private weak var store: ServerStore?
@@ -89,11 +106,13 @@ final class SessionOrganizer {
     private struct Stored: Codable {
         var sort: SessionSort?
         var filter: SessionFilter?
+        var grouping: SessionGrouping?
         var showMirrors: Bool?
         var groupOrder: [String]?
         var groupOrderAt: Double?
         var collapsedGroups: Set<String>?
         var pinnedCollapsed: Bool?
+        var collapsedProjects: Set<String>?
         var servers: [String: ServerLayout]?
     }
 
@@ -104,6 +123,8 @@ final class SessionOrganizer {
               let s = try? JSONDecoder().decode(Stored.self, from: data) else { return }
         sort = s.sort ?? .updated
         filter = s.filter ?? .recent
+        grouping = s.grouping ?? .groups
+        collapsedProjects = s.collapsedProjects ?? []
         showMirrors = s.showMirrors ?? false
         for (k, v) in s.servers ?? [:] {
             if let id = UUID(uuidString: k) { layouts[id] = v }
@@ -246,6 +267,16 @@ final class SessionOrganizer {
     }
     func removeGroup(_ server: UUID, _ name: String) { removeGroup(name) }
 
+    // MARK: Projects
+
+    func isProjectCollapsed(_ id: String) -> Bool { collapsedProjects.contains(id) }
+
+    func setProjectCollapsed(_ id: String, _ on: Bool) {
+        guard on != collapsedProjects.contains(id) else { return }
+        if on { collapsedProjects.insert(id) } else { collapsedProjects.remove(id) }
+        save()
+    }
+
     // MARK: Server sections
 
     func isServerCollapsed(_ server: UUID) -> Bool { layout(server).sectionCollapsed }
@@ -363,8 +394,9 @@ final class SessionOrganizer {
 
     private func save() {
         guard !loading else { return }
-        let stored = Stored(sort: sort, filter: filter, showMirrors: showMirrors,
+        let stored = Stored(sort: sort, filter: filter, grouping: grouping, showMirrors: showMirrors,
                             groupOrder: groupOrder, groupOrderAt: groupOrderAt, collapsedGroups: collapsedGroups, pinnedCollapsed: pinnedCollapsed,
+                            collapsedProjects: collapsedProjects,
                             servers: Dictionary(uniqueKeysWithValues: layouts.map { ($0.key.uuidString, $0.value) }))
         let enc = JSONEncoder()
         enc.outputFormatting = [.prettyPrinted, .sortedKeys]
