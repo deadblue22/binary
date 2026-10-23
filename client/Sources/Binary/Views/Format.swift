@@ -1,4 +1,8 @@
+#if os(macOS)
 import AppKit
+#else
+import UIKit
+#endif
 import SwiftUI
 
 enum Format {
@@ -203,29 +207,23 @@ struct StatusDot: View {
 /// animation. A SwiftUI repeatForever animation made SwiftUI re-render the
 /// whole window every frame for as long as any session ran (a third of a
 /// core with a long sidebar); the render server animates a layer on its own.
+#if os(macOS)
 private struct PulseRing: NSViewRepresentable {
     let color: Color
 
     func makeNSView(context: Context) -> PulseRingView { PulseRingView() }
 
     func updateNSView(_ view: PulseRingView, context: Context) {
-        view.color = NSColor(color).withAlphaComponent(0.5)
+        view.ring.strokeColor = NSColor(color).withAlphaComponent(0.5).cgColor
     }
 }
 
 final class PulseRingView: NSView {
-    private let ring = CAShapeLayer()
-
-    var color: NSColor = .clear {
-        didSet { ring.strokeColor = color.cgColor }
-    }
+    let ring = PulseRingLayer()
 
     override init(frame: NSRect) {
         super.init(frame: frame)
         wantsLayer = true
-        ring.fillColor = nil
-        ring.lineWidth = 1.5
-        ring.opacity = 0
         layer?.addSublayer(ring)
     }
 
@@ -236,30 +234,88 @@ final class PulseRingView: NSView {
 
     override func layout() {
         super.layout()
-        CATransaction.begin()
-        CATransaction.setDisableActions(true)
-        ring.frame = bounds
-        ring.path = CGPath(ellipseIn: bounds.insetBy(dx: 0.75, dy: 0.75), transform: nil)
-        CATransaction.commit()
+        ring.fit(bounds)
     }
 
     override func viewDidMoveToWindow() {
         super.viewDidMoveToWindow()
         ring.removeAllAnimations()
         guard let window else { return }
-        ring.contentsScale = window.backingScaleFactor
-        let scale = CABasicAnimation(keyPath: "transform.scale")
-        scale.fromValue = 1
-        scale.toValue = 2.1
+        ring.start(scale: window.backingScaleFactor)
+    }
+}
+#else
+private struct PulseRing: UIViewRepresentable {
+    let color: Color
+
+    func makeUIView(context: Context) -> PulseRingView { PulseRingView() }
+
+    func updateUIView(_ view: PulseRingView, context: Context) {
+        view.ring.strokeColor = UIColor(color).withAlphaComponent(0.5).cgColor
+    }
+}
+
+final class PulseRingView: UIView {
+    let ring = PulseRingLayer()
+
+    override init(frame: CGRect) {
+        super.init(frame: frame)
+        // Taps go to the row underneath.
+        isUserInteractionEnabled = false
+        layer.addSublayer(ring)
+    }
+
+    required init?(coder: NSCoder) { fatalError() }
+
+    override func layoutSubviews() {
+        super.layoutSubviews()
+        ring.fit(bounds)
+    }
+
+    override func didMoveToWindow() {
+        super.didMoveToWindow()
+        ring.removeAllAnimations()
+        guard let window else { return }
+        ring.start(scale: window.screen.scale)
+    }
+}
+#endif
+
+/// The ring itself, shared by both platforms' views.
+final class PulseRingLayer: CAShapeLayer {
+    override init() {
+        super.init()
+        fillColor = nil
+        lineWidth = 1.5
+        opacity = 0
+    }
+
+    override init(layer: Any) { super.init(layer: layer) }
+
+    required init?(coder: NSCoder) { fatalError() }
+
+    func fit(_ bounds: CGRect) {
+        CATransaction.begin()
+        CATransaction.setDisableActions(true)
+        frame = bounds
+        path = CGPath(ellipseIn: bounds.insetBy(dx: 0.75, dy: 0.75), transform: nil)
+        CATransaction.commit()
+    }
+
+    func start(scale: CGFloat) {
+        contentsScale = scale
+        let grow = CABasicAnimation(keyPath: "transform.scale")
+        grow.fromValue = 1
+        grow.toValue = 2.1
         let fade = CABasicAnimation(keyPath: "opacity")
         fade.fromValue = 1
         fade.toValue = 0
         let pulse = CAAnimationGroup()
-        pulse.animations = [scale, fade]
+        pulse.animations = [grow, fade]
         pulse.duration = 1.4
         pulse.timingFunction = CAMediaTimingFunction(name: .easeOut)
         pulse.repeatCount = .infinity
-        ring.add(pulse, forKey: "pulse")
+        add(pulse, forKey: "pulse")
     }
 }
 
