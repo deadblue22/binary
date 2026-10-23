@@ -209,10 +209,13 @@ struct PlainField: View {
     @Binding var text: String
     var focus: FocusState<Bool>.Binding
     @Environment(\.theme) private var theme
+    /// An input method is composing text the binding doesn't have yet.
+    @State private var composing = false
+    @State private var composingWatcher = ComposingWatcher()
 
     var body: some View {
         ZStack(alignment: .leading) {
-            if text.isEmpty {
+            if text.isEmpty && !composing {
                 theme.placeholder(placeholder)
                     .lineLimit(1)
                     .allowsHitTesting(false)
@@ -223,6 +226,10 @@ struct PlainField: View {
                 .focused(focus)
                 .accessibilityLabel(placeholder)
         }
+        .onAppear { composingWatcher.install { composing = focus.wrappedValue && $0 } }
+        .onDisappear { composingWatcher.remove() }
+        .onChange(of: text) { _, _ in composing = focus.wrappedValue && ComposingWatcher.composing() }
+        .onChange(of: focus.wrappedValue) { _, f in if !f { composing = false } }
     }
 }
 
