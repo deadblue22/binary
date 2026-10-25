@@ -339,7 +339,7 @@ export class Manager implements SessionHost, SessionToolHost {
   }
 
   get defaultMode(): string {
-    return this.cfg.data.defaultPermissionMode || 'default';
+    return this.cfg.data.defaultPermissionMode || 'auto';
   }
 
   permissionModes(): string[] {

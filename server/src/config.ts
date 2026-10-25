@@ -78,7 +78,7 @@ export function loadConfig(dir: string): Config {
       token: newToken(),
       idleTimeoutMinutes: 30,
       allowBypassPermissions: true,
-      defaultPermissionMode: 'default',
+      defaultPermissionMode: 'auto',
     });
     cfg.save();
     return cfg;

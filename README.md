@@ -258,7 +258,7 @@ When connected to an older server (without the groups, child sessions or subagen
 | `claudePath` | bundled with the SDK | Use your own Claude Code install instead (compatibility not guaranteed if versions don't match) |
 | `idleTimeoutMinutes` | `30` | How long a claude process may stay idle before it is reclaimed; `0` never reclaims; processes with background tasks running are not reclaimed |
 | `allowBypassPermissions` | `true` | Whether `bypassPermissions` mode is allowed |
-| `defaultPermissionMode` | `default` | Permission mode used when none is set for a session |
+| `defaultPermissionMode` | `auto` | Permission mode used when none is set for a session |
 | `tlsCert` / `tlsKey` | empty | Enables HTTPS when both are set |
 | `keepEnv` | empty | Extra `CLAUDE_CODE_*` environment variables passed through to claude |
 | `desktopLinks` | `true` | Read parent/child sessions and SSH sessions from the Claude desktop app's session records (read-only, see below) |
