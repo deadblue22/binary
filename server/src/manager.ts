@@ -858,6 +858,9 @@ export class Manager implements SessionHost, SessionToolHost {
       // get_session / set_session_title, as the Claude desktop app gives its sessions.
       mcpServers: { [SESSION_TOOL_SERVER]: sessionTools(s.id, this) },
       allowedTools: SESSION_TOOLS,
+      // Claude in Chrome: off in SDK mode unless asked for. Its tools need no
+      // allow rule; the extension's own site permissions govern them.
+      ...(this.cfg.data.chrome !== false ? { extraArgs: { chrome: null } } : {}),
       // Hook inputs carry the effort Claude Code applies to the turn, after its
       // own defaults and model limits: the only place an SDK host can read it.
       hooks: { PreToolUse: [{ hooks: [this.effortHook(s)] }], Stop: [{ hooks: [this.effortHook(s)] }] },

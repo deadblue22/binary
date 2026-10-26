@@ -20,6 +20,7 @@ A client/server tool for managing Claude Code sessions on your own machine or on
 | Model / Effort | Set per session; while the process runs, switching the model or a low–xhigh effort takes effect immediately, and `max` restarts the process automatically before the next turn (the session stays the same) |
 | Groups and subagents | Sessions can be organized into groups (Claude Code session tags); sessions the Claude desktop app spawned from another session are nested under their parent; each session's subagents (Task / Agent tool) can be viewed on their own. "Ungrouped Sessions by Project" in the list's menu splits the sessions outside groups into one section per project folder on each server (sessions in a worktree under `.claude/worktrees` count as their repository's); a project's menu archives all its sessions at once |
 | Session tools | In sessions Binary starts, Claude can use `get_session` / `set_session_title` to read and change the session title (same names and parameters as in the Claude desktop app), so project instructions that ask it to maintain the title still work |
+| Claude in Chrome | Sessions Binary starts get the `mcp__claude-in-chrome__*` tools, as in interactive Claude Code and the desktop app, so Claude can work in your own Chrome with your logins instead of a blank automated browser |
 | Permission approval | Approve tool permission requests in the client with Allow / Always Allow / Deny (with an optional reason); `AskUserQuestion` appears as a form of options, `ExitPlanMode` shows the plan for approval |
 | Notifications | While Binary is in the background, it posts a system notification when a session needs approval, finishes or fails; the Dock icon badge shows the number of pending approvals |
 
@@ -264,6 +265,7 @@ When connected to an older server (without the groups, child sessions or subagen
 | `keepEnv` | empty | Extra `CLAUDE_CODE_*` environment variables passed through to claude |
 | `desktopLinks` | `true` | Read parent/child sessions and SSH sessions from the Claude desktop app's session records (read-only, see below) |
 | `desktopSessionsDir` | desktop app directory | Location of the desktop app's session records (on macOS defaults to `~/Library/Application Support/Claude/claude-code-sessions`) |
+| `chrome` | `true` | Start claude with `--chrome` so sessions can use the Claude in Chrome extension (the browser connected to your Claude account; see below) |
 
 Activity descriptions and error messages from the server follow the client's `Accept-Language` request header (Chinese / English), defaulting to Chinese when it's absent.
 
@@ -330,6 +332,7 @@ The iOS app reads its own set (see `client/iOS/Sources/App/PhoneDebugHooks.swift
 - The history API doesn't provide per-turn effort, cost or duration: the divider at the end of each turn comes only from live output, and the sidebar's last model and preview are available only after the session has been viewed or run by Binary.
 - Large transcripts (hundreds of MB) are reread in full when they change, throttled by read time (measured: 0.2–0.4 seconds per read for 94–142MB), so they update less promptly than small sessions.
 - Claude Code doesn't record parent/child relations between sessions. They come from two places: "New Child Session" in Binary, and the Claude desktop app's own session records (only five fields are read; this isn't a public interface, so if the desktop app changes its format, sessions simply stop being nested; turn it off with `desktopLinks: false`). Sessions started manually in a terminal have no parent/child relations.
+- Claude in Chrome reaches the browser through the Claude in Chrome extension signed in to the same Claude account, not through the server's own screen: a session on one server can reach a browser on another machine signed in to the same account, and when several browsers are connected it uses the one picked last (Claude can list them and switch). Turn it off per server with `chrome: false`.
 - Sessions the Claude desktop app runs on other machines over SSH appear in the local list as mirrored transcripts and are view-only; so are sessions whose working directory no longer exists locally. To work with remote sessions, deploy binaryd on that machine and add it as a server; the local copies are then hidden automatically.
 - The client is not signed (ad-hoc signature); if macOS blocks it on first launch, right-click it in Finder and choose "Open".
 - The iOS app gets no push notifications: once iOS suspends it in the background, it catches up when it comes back. Signed with a free Apple ID, it has to be installed again every 7 days.

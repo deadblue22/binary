@@ -35,6 +35,11 @@ export interface ConfigFile {
   desktopLinks?: boolean;
   /** Where those records are (default: the desktop app's folder on macOS). */
   desktopSessionsDir?: string;
+  /**
+   * Start claude with --chrome so sessions get the Claude in Chrome tools,
+   * as interactive Claude Code does when the extension is set up (default true).
+   */
+  chrome?: boolean;
 }
 
 export class Config {
