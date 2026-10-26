@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { SESSION_TOOLS, sessionToolDefs, type SessionToolHost } from '../src/tools.js';
-import { harness } from './helpers.js';
+import { harness, waitFor } from './helpers.js';
 
 type Def = { name: string; handler: (args: Record<string, string>, extra: unknown) => Promise<{ content: { text: string }[]; isError?: boolean }> };
 
@@ -49,6 +49,26 @@ test('session tools go to claude, auto-allowed, and rename through the manager',
     assert.equal(h.manager.summary(sum.id)?.appliedEffort, 'medium');
     await h.manager.update(sum.id, { effort: 'low' });
     assert.equal(h.manager.summary(sum.id)?.appliedEffort, undefined);
+  } finally {
+    await h.close();
+  }
+});
+
+test('sessions start with Claude in Chrome unless the config turns it off', async () => {
+  const h = await harness();
+  try {
+    const sum = await h.manager.create({ cwd: h.cwd });
+    const s = h.manager.session(sum.id)!;
+    const opts = await h.manager.queryOptions(s);
+    assert.deepEqual(opts.extraArgs, { chrome: null });
+    // No allow rule: Claude Code lets the extension's site permissions decide.
+    assert.deepEqual(opts.allowedTools, SESSION_TOOLS);
+    await s.send('hi');
+    await waitFor('the turn ends', () => s.state === 'idle' && s.log.entries.some((e) => e.kind === 'result'));
+    assert.ok(h.launches()[0].split(' ').includes('--chrome'), h.launches()[0]);
+
+    h.manager.cfg.data.chrome = false;
+    assert.equal((await h.manager.queryOptions(s)).extraArgs, undefined);
   } finally {
     await h.close();
   }
