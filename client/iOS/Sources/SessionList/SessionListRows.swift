@@ -472,6 +472,8 @@ struct SectionTitle<MenuContent: View>: View {
     let title: String
     let count: Int?
     let expanded: Bool
+    /// Sessions with a turn running; shown while folded.
+    var busy = 0
     let onToggle: () -> Void
     @ViewBuilder var menu: () -> MenuContent
     @Environment(\.theme) private var theme
@@ -488,6 +490,13 @@ struct SectionTitle<MenuContent: View>: View {
                     .monospacedDigit()
                     .foregroundStyle(theme.c.textFaint)
             }
+            if !expanded && busy > 0 {
+                HStack(spacing: 3) {
+                    StatusDot(state: .running, live: true)
+                    Text("\(busy)").fontWeight(.regular).monospacedDigit()
+                }
+                .foregroundStyle(theme.c.running)
+            }
         } trailing: {
             if MenuContent.self != EmptyView.self {
                 HeaderMenu(content: menu)
@@ -497,8 +506,8 @@ struct SectionTitle<MenuContent: View>: View {
 }
 
 extension SectionTitle where MenuContent == EmptyView {
-    init(icon: String, title: String, count: Int?, expanded: Bool, onToggle: @escaping () -> Void) {
-        self.init(icon: icon, title: title, count: count, expanded: expanded, onToggle: onToggle) { EmptyView() }
+    init(icon: String, title: String, count: Int?, expanded: Bool, busy: Int = 0, onToggle: @escaping () -> Void) {
+        self.init(icon: icon, title: title, count: count, expanded: expanded, busy: busy, onToggle: onToggle) { EmptyView() }
     }
 }
 

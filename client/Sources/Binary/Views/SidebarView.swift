@@ -409,7 +409,7 @@ struct SidebarView: View {
     @ViewBuilder
     private func projectView(_ p: ProjectGroup, conn: ServerConnection) -> some View {
         let toggle = { org.setProjectCollapsed(p.id, !p.collapsed) }
-        ProjectHeader(name: p.name, folder: p.folder, count: p.nodes.count, collapsed: p.collapsed,
+        ProjectHeader(name: p.name, folder: p.folder, count: p.nodes.count, collapsed: p.collapsed, busy: p.busy,
                       onNew: { newSession(in: p) }, onToggle: toggle) {
             Button(tr("New Session in Project")) { newSession(in: p) }
             Divider()
@@ -435,7 +435,7 @@ struct SidebarView: View {
         let collapsed = section.otherProjectsCollapsed
         let toggle = { org.setOtherProjectsCollapsed(conn.id, !collapsed) }
         ProjectHeader(name: tr("Other Projects"), folder: "", count: section.otherProjects.reduce(0) { $0 + $1.nodes.count },
-                      collapsed: collapsed, onToggle: toggle) {
+                      collapsed: collapsed, busy: section.otherProjects.reduce(0) { $0 + $1.busy }, onToggle: toggle) {
             Button(collapsed ? tr("Expand") : tr("Collapse"), action: toggle)
         }
         if !collapsed {

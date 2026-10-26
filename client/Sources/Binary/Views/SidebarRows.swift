@@ -225,6 +225,8 @@ struct ProjectHeader<MenuContent: View>: View {
     let folder: String
     let count: Int
     let collapsed: Bool
+    /// Sessions with a turn running; shown while folded, as on servers.
+    var busy = 0
     var onNew: (() -> Void)? = nil
     let onToggle: () -> Void
     @ViewBuilder let menu: () -> MenuContent
@@ -243,6 +245,15 @@ struct ProjectHeader<MenuContent: View>: View {
             if let onNew {
                 AddButton(action: onNew, rowHover: hover)
                     .help(tr("New Session in \(name)"))
+            }
+            if collapsed && busy > 0 {
+                HStack(spacing: 3) {
+                    StatusDot(state: .running, live: true)
+                    Text("\(busy)").monospacedDigit()
+                }
+                .font(theme.font(.caption))
+                .foregroundStyle(theme.c.running)
+                .help(tr("\(busy) running"))
             }
             CountBadge(count: count)
         }

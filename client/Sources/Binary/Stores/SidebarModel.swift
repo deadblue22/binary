@@ -13,6 +13,12 @@ struct SidebarNode: Identifiable {
 
     /// Pending approvals in nested sessions, shown on the parent.
     var childPending: Int { children.reduce(0) { $0 + $1.session.pending + $1.childPending } }
+
+    /// Sessions in this tree with a turn running, here or in another program.
+    var busy: Int {
+        let s = session.shownState
+        return (s.isBusy || s == .external ? 1 : 0) + children.reduce(0) { $0 + $1.busy }
+    }
 }
 
 struct SidebarGroup: Identifiable {
@@ -34,6 +40,9 @@ struct ProjectGroup: Identifiable {
     var id: String { Self.id(server, folder) }
 
     static func id(_ server: UUID, _ folder: String) -> String { "\(server.uuidString)|\(folder)" }
+
+    /// Sessions with a turn running, shown on the header while it's folded.
+    var busy: Int { nodes.reduce(0) { $0 + $1.busy } }
 
     /// The project a session's folder belongs to: a worktree under
     /// .claude/worktrees counts as its repository's.

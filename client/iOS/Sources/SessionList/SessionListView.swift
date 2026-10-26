@@ -239,7 +239,7 @@ struct SessionListView: View {
     @ViewBuilder
     private func projectRows(_ p: ProjectGroup, conn: ServerConnection) -> some View {
         let toggle = { withAnimation(.easeOut(duration: 0.15)) { org.setProjectCollapsed(p.id, !p.collapsed) } }
-        SectionTitle(icon: "folder", title: p.name, count: p.nodes.count, expanded: !p.collapsed, onToggle: toggle) {
+        SectionTitle(icon: "folder", title: p.name, count: p.nodes.count, expanded: !p.collapsed, busy: p.busy, onToggle: toggle) {
             Button { newSession(in: p) } label: { Label(tr("New Session in Project"), systemImage: "square.and.pencil") }
             if !p.folder.isEmpty {
                 Button { copy(p.folder) } label: { Label(tr("Copy Path"), systemImage: "doc.on.doc") }
@@ -263,7 +263,8 @@ struct SessionListView: View {
     private func otherProjectRows(_ section: SidebarSection, conn: ServerConnection) -> some View {
         let collapsed = section.otherProjectsCollapsed
         SectionTitle(icon: "folder.badge.questionmark", title: tr("Other Projects"),
-                     count: section.otherProjects.reduce(0) { $0 + $1.nodes.count }, expanded: !collapsed) {
+                     count: section.otherProjects.reduce(0) { $0 + $1.nodes.count }, expanded: !collapsed,
+                     busy: section.otherProjects.reduce(0) { $0 + $1.busy }) {
             withAnimation(.easeOut(duration: 0.15)) { org.setOtherProjectsCollapsed(conn.id, !collapsed) }
         }
         .listRowBackground(Color.clear)
