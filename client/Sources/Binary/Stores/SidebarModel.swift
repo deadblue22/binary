@@ -82,11 +82,14 @@ struct SidebarSection: Identifiable {
     var pinned: [SidebarNode] = []
     var groups: [SidebarGroup] = []
     var ungrouped: [SidebarNode] = []
-    /// Grouping by project: the sessions not pinned, by folder.
+    /// Grouping by project: the sessions not pinned, by folder; starred
+    /// projects have their own sections, the rest sit in one fold.
     var projects: [ProjectGroup] = []
+    var otherProjects: [ProjectGroup] = []
+    var otherProjectsCollapsed = true
     var id: UUID { conn.id }
 
-    var isEmpty: Bool { (flat ?? []).isEmpty && pinned.isEmpty && groups.isEmpty && ungrouped.isEmpty && projects.isEmpty }
+    var isEmpty: Bool { (flat ?? []).isEmpty && pinned.isEmpty && groups.isEmpty && ungrouped.isEmpty && projects.isEmpty && otherProjects.isEmpty }
     var groupNames: [String] { groups.map(\.name) }
 }
 
@@ -157,8 +160,9 @@ struct RowPlace: Equatable {
     enum Area: Equatable {
         case pinned
         case group(String)
-        /// A project section, by `ProjectGroup.id`.
-        case project(String)
+        /// A project section, by `ProjectGroup.id`; `other` when it sits in
+        /// the Other Projects fold.
+        case project(String, other: Bool)
         /// A server's own section; folding it hides the row unless it's a
         /// search or archive list.
         case server(foldable: Bool)
@@ -173,8 +177,8 @@ enum SidebarBuilder {
     static let recentWindow: TimeInterval = 3 * 86400
 
     /// `hits`: sessions whose messages match `query` (ContentSearch), by id.
-    /// `starred`: the folders of the server's starred projects, the only ones
-    /// that get a section when grouping by project.
+    /// `starred`: the folders of the server's starred projects, the ones that
+    /// get a section of their own when grouping by project.
     static func build(_ conn: ServerConnection, org: SessionOrganizer, query: String, starred: Set<String>,
                       mirrors: MirrorIndex = MirrorIndex(), hits: [String: ContentHit] = [:]) -> SidebarSection {
         let layout = org.layout(conn.id)
@@ -262,10 +266,10 @@ enum SidebarBuilder {
         }
         let ungrouped = rest.filter { $0.session.group == nil }
         if byProject {
-            // Sessions outside starred projects stay plain ungrouped rows.
-            let inProject = ungrouped.filter { starred.contains(ProjectGroup.folder(of: $0.session.cwd)) }
-            section.projects = projectGroups(inProject, server: conn.id, org: org)
-            section.ungrouped = ungrouped.filter { !starred.contains(ProjectGroup.folder(of: $0.session.cwd)) }
+            let isStarred = { (n: SidebarNode) in starred.contains(ProjectGroup.folder(of: n.session.cwd)) }
+            section.projects = projectGroups(ungrouped.filter(isStarred), server: conn.id, org: org)
+            section.otherProjects = projectGroups(ungrouped.filter { !isStarred($0) }, server: conn.id, org: org)
+            section.otherProjectsCollapsed = org.isOtherProjectsCollapsed(conn.id)
         } else {
             section.ungrouped = ungrouped
         }
@@ -372,7 +376,10 @@ enum SidebarBuilder {
                 if let p = path(in: g.nodes) { return RowPlace(area: .group(g.name), ancestors: p) }
             }
             for g in s.projects {
-                if let p = path(in: g.nodes) { return RowPlace(area: .project(g.id), ancestors: p) }
+                if let p = path(in: g.nodes) { return RowPlace(area: .project(g.id, other: false), ancestors: p) }
+            }
+            for g in s.otherProjects {
+                if let p = path(in: g.nodes) { return RowPlace(area: .project(g.id, other: true), ancestors: p) }
             }
             if let p = path(in: s.ungrouped) { return RowPlace(area: .server(foldable: true), ancestors: p) }
         }
@@ -416,8 +423,11 @@ enum SidebarBuilder {
                 s.pinned.forEach { walk($0, s.conn) }
                 for g in s.groups where !g.collapsed { g.nodes.forEach { walk($0, s.conn) } }
             }
-            s.ungrouped.forEach { walk($0, s.conn) }
             for g in s.projects where !g.collapsed { g.nodes.forEach { walk($0, s.conn) } }
+            if !s.otherProjectsCollapsed {
+                for g in s.otherProjects where !g.collapsed { g.nodes.forEach { walk($0, s.conn) } }
+            }
+            s.ungrouped.forEach { walk($0, s.conn) }
         }
         return out
     }

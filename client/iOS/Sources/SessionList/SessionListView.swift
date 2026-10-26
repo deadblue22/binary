@@ -203,11 +203,10 @@ struct SessionListView: View {
                         ForEach(g.nodes) { n in tree(n, conn: conn) }
                     }
                 }
-                // Sessions outside starred projects come first, so they don't
-                // read as part of the last project.
-                ForEach(section.ungrouped) { n in tree(n, conn: conn) }
                 ForEach(section.projects) { p in projectRows(p, conn: conn) }
-                if (merged ? section.ungrouped.isEmpty && section.projects.isEmpty : section.isEmpty), conn.status == .online {
+                if !section.otherProjects.isEmpty { otherProjectRows(section, conn: conn) }
+                ForEach(section.ungrouped) { n in tree(n, conn: conn) }
+                if (merged ? section.ungrouped.isEmpty && section.projects.isEmpty && section.otherProjects.isEmpty : section.isEmpty), conn.status == .online {
                     EmptyLine(text: org.filter == .recent ? tr("No activity in the last 3 days") : tr("No sessions"))
                 }
             }
@@ -256,6 +255,21 @@ struct SessionListView: View {
         .listRowSeparator(.hidden)
         if !p.collapsed {
             ForEach(p.nodes) { n in tree(n, conn: conn) }
+        }
+    }
+
+    /// Projects that aren't starred, folded into one section until wanted.
+    @ViewBuilder
+    private func otherProjectRows(_ section: SidebarSection, conn: ServerConnection) -> some View {
+        let collapsed = section.otherProjectsCollapsed
+        SectionTitle(icon: "folder.badge.questionmark", title: tr("Other Projects"),
+                     count: section.otherProjects.reduce(0) { $0 + $1.nodes.count }, expanded: !collapsed) {
+            withAnimation(.easeOut(duration: 0.15)) { org.setOtherProjectsCollapsed(conn.id, !collapsed) }
+        }
+        .listRowBackground(Color.clear)
+        .listRowSeparator(.hidden)
+        if !collapsed {
+            ForEach(section.otherProjects) { p in projectRows(p, conn: conn) }
         }
     }
 

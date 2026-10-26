@@ -90,6 +90,9 @@ final class SessionOrganizer {
     var pinnedCollapsed = false { didSet { save() } }
     /// Folded project sections, as `ProjectKey.id` (server and folder).
     private(set) var collapsedProjects: Set<String> = []
+    /// Servers whose Other Projects fold (projects not starred) is open; it
+    /// starts folded.
+    private(set) var openOtherProjects: Set<String> = []
 
     @ObservationIgnored private var loading = false
     @ObservationIgnored private weak var store: ServerStore?
@@ -105,6 +108,7 @@ final class SessionOrganizer {
         var collapsedGroups: Set<String>?
         var pinnedCollapsed: Bool?
         var collapsedProjects: Set<String>?
+        var openOtherProjects: Set<String>?
         var servers: [String: ServerLayout]?
     }
 
@@ -117,6 +121,7 @@ final class SessionOrganizer {
         filter = s.filter ?? .recent
         grouping = s.grouping ?? .groups
         collapsedProjects = s.collapsedProjects ?? []
+        openOtherProjects = s.openOtherProjects ?? []
         showMirrors = s.showMirrors ?? false
         for (k, v) in s.servers ?? [:] {
             if let id = UUID(uuidString: k) { layouts[id] = v }
@@ -269,6 +274,14 @@ final class SessionOrganizer {
         save()
     }
 
+    func isOtherProjectsCollapsed(_ server: UUID) -> Bool { !openOtherProjects.contains(server.uuidString) }
+
+    func setOtherProjectsCollapsed(_ server: UUID, _ on: Bool) {
+        guard on != isOtherProjectsCollapsed(server) else { return }
+        if on { openOtherProjects.remove(server.uuidString) } else { openOtherProjects.insert(server.uuidString) }
+        save()
+    }
+
     // MARK: Server sections
 
     func isServerCollapsed(_ server: UUID) -> Bool { layout(server).sectionCollapsed }
@@ -388,7 +401,7 @@ final class SessionOrganizer {
         guard !loading else { return }
         let stored = Stored(sort: sort, filter: filter, grouping: grouping, showMirrors: showMirrors,
                             groupOrder: groupOrder, groupOrderAt: groupOrderAt, collapsedGroups: collapsedGroups, pinnedCollapsed: pinnedCollapsed,
-                            collapsedProjects: collapsedProjects,
+                            collapsedProjects: collapsedProjects, openOtherProjects: openOtherProjects,
                             servers: Dictionary(uniqueKeysWithValues: layouts.map { ($0.key.uuidString, $0.value) }))
         let enc = JSONEncoder()
         enc.outputFormatting = [.prettyPrinted, .sortedKeys]

@@ -393,11 +393,10 @@ struct SidebarView: View {
                     drop($0, conn) { refs in move(refs, to: "") }
                 }
             }
-            // Sessions outside starred projects come first, so they don't
-            // read as part of the last project.
-            ForEach(section.ungrouped) { n in tree(n, conn: conn) }
             ForEach(section.projects) { p in projectView(p, conn: conn) }
-            if (merged ? section.ungrouped.isEmpty && section.projects.isEmpty : section.isEmpty), conn.status == .online {
+            if !section.otherProjects.isEmpty { otherProjectsView(section, conn: conn) }
+            ForEach(section.ungrouped) { n in tree(n, conn: conn) }
+            if (merged ? section.ungrouped.isEmpty && section.projects.isEmpty && section.otherProjects.isEmpty : section.isEmpty), conn.status == .online {
                 emptyLine(org.filter == .recent ? tr("No activity in the last 3 days") : tr("No sessions"))
             }
         }
@@ -427,6 +426,23 @@ struct SidebarView: View {
         }
         if !p.collapsed {
             ForEach(p.nodes) { n in tree(n, conn: conn) }
+        }
+    }
+
+    /// Projects that aren't starred, folded into one section until wanted.
+    @ViewBuilder
+    private func otherProjectsView(_ section: SidebarSection, conn: ServerConnection) -> some View {
+        let collapsed = section.otherProjectsCollapsed
+        let toggle = { org.setOtherProjectsCollapsed(conn.id, !collapsed) }
+        ProjectHeader(name: tr("Other Projects"), folder: "", count: section.otherProjects.reduce(0) { $0 + $1.nodes.count },
+                      collapsed: collapsed, onToggle: toggle) {
+            Button(collapsed ? tr("Expand") : tr("Collapse"), action: toggle)
+        }
+        if !collapsed {
+            VStack(spacing: 0) {
+                ForEach(section.otherProjects) { p in projectView(p, conn: conn) }
+            }
+            .padding(.leading, 14)
         }
     }
 
@@ -576,9 +592,13 @@ struct SidebarView: View {
                 org.toggleCollapsed(ref.server, g)
                 opened = true
             }
-        case .project(let id)?:
+        case .project(let id, let other)?:
             if org.isServerCollapsed(ref.server) {
                 org.setServerCollapsed(ref.server, false)
+                opened = true
+            }
+            if other && org.isOtherProjectsCollapsed(ref.server) {
+                org.setOtherProjectsCollapsed(ref.server, false)
                 opened = true
             }
             if org.isProjectCollapsed(id) {
