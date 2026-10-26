@@ -23,12 +23,13 @@ enum Format {
         return date.formatted(Date.FormatStyle().month().day().locale(locale))
     }
 
-    /// "in 12 min".
+    /// "in 12 min", "in 3 h 5 min", "in 2 d 4 h".
     static func relativeFuture(_ date: Date) -> String {
         let s = date.timeIntervalSinceNow
         if s < 60 { return tr("in under a minute") }
         if s < 3600 { return tr("in \(Int(s / 60)) min") }
-        return tr("in \(Int(s / 3600)) h \(Int(s.truncatingRemainder(dividingBy: 3600) / 60)) min")
+        if s < 86400 { return tr("in \(Int(s / 3600)) h \(Int(s.truncatingRemainder(dividingBy: 3600) / 60)) min") }
+        return tr("in \(Int(s / 86400)) d \(Int(s.truncatingRemainder(dividingBy: 86400) / 3600)) h")
     }
 
     /// Locale for dates, following the UI language.
@@ -56,13 +57,13 @@ enum Format {
         "\(Int(c.percent.rounded()))% · \(tokens(c.tokens)) / \(tokens(c.max))"
     }
 
-    /// "resets 10/26" or "resets 01:39".
+    /// "resets 10/26 14:05 · in 1 d 20 h" or "resets 01:39 · in 3 h 12 min".
     static func planReset(_ w: PlanUsage.Window) -> String? {
         guard let r = w.resetsAt, let d = ISO8601DateFormatter.withFraction.date(from: r) ?? ISO8601DateFormatter().date(from: r) else { return nil }
         let when = d.timeIntervalSinceNow < 86_400
             ? d.formatted(Date.FormatStyle().hour().minute().locale(locale))
             : d.formatted(Date.FormatStyle().month(.defaultDigits).day().hour().minute().locale(locale))
-        return tr("resets \(when)")
+        return tr("resets \(when)") + " · " + relativeFuture(d)
     }
 
     static func planWindowName(_ kind: String) -> String {
@@ -76,7 +77,7 @@ enum Format {
         }
     }
 
-    /// "60% · resets Oct 26" from a usage window.
+    /// "60% · resets 10/26 · in 1 d 20 h" from a usage window.
     static func planWindow(_ w: PlanUsage.Window) -> String {
         let pct = "\(Int(w.percent.rounded()))%"
         guard let r = w.resetsAt, let d = ISO8601DateFormatter.withFraction.date(from: r) ?? ISO8601DateFormatter().date(from: r) else { return pct }
@@ -84,7 +85,7 @@ enum Format {
         let when = d.timeIntervalSinceNow < 86_400
             ? d.formatted(Date.FormatStyle().hour().minute().locale(locale))
             : d.formatted(Date.FormatStyle().month(.defaultDigits).day().locale(locale))
-        return pct + " · " + tr("resets \(when)")
+        return pct + " · " + tr("resets \(when)") + " · " + relativeFuture(d)
     }
 
     static func duration(_ ms: Int64?) -> String? {

@@ -429,6 +429,7 @@
  "housekeeping": "后台维护",
  "idle": "空闲",
  "in under a minute": "1 分钟内",
+ "in {0} d {1} h": "{0} 天 {1} 小时后",
  "in {0} h {1} min": "{0} 小时 {1} 分钟后",
  "in {0} min": "{0} 分钟后",
  "just now": "刚刚",
