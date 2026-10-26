@@ -173,7 +173,9 @@ enum SidebarBuilder {
     static let recentWindow: TimeInterval = 3 * 86400
 
     /// `hits`: sessions whose messages match `query` (ContentSearch), by id.
-    static func build(_ conn: ServerConnection, org: SessionOrganizer, query: String,
+    /// `starred`: the folders of the server's starred projects, the only ones
+    /// that get a section when grouping by project.
+    static func build(_ conn: ServerConnection, org: SessionOrganizer, query: String, starred: Set<String>,
                       mirrors: MirrorIndex = MirrorIndex(), hits: [String: ContentHit] = [:]) -> SidebarSection {
         let layout = org.layout(conn.id)
         let hidden = org.showMirrors ? [] : mirrors.hidden(on: conn.id)
@@ -260,7 +262,10 @@ enum SidebarBuilder {
         }
         let ungrouped = rest.filter { $0.session.group == nil }
         if byProject {
-            section.projects = projectGroups(ungrouped, server: conn.id, org: org)
+            // Sessions outside starred projects stay plain ungrouped rows.
+            let inProject = ungrouped.filter { starred.contains(ProjectGroup.folder(of: $0.session.cwd)) }
+            section.projects = projectGroups(inProject, server: conn.id, org: org)
+            section.ungrouped = ungrouped.filter { !starred.contains(ProjectGroup.folder(of: $0.session.cwd)) }
         } else {
             section.ungrouped = ungrouped
         }
@@ -411,8 +416,8 @@ enum SidebarBuilder {
                 s.pinned.forEach { walk($0, s.conn) }
                 for g in s.groups where !g.collapsed { g.nodes.forEach { walk($0, s.conn) } }
             }
-            for g in s.projects where !g.collapsed { g.nodes.forEach { walk($0, s.conn) } }
             s.ungrouped.forEach { walk($0, s.conn) }
+            for g in s.projects where !g.collapsed { g.nodes.forEach { walk($0, s.conn) } }
         }
         return out
     }

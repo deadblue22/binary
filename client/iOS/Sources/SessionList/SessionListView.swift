@@ -6,6 +6,7 @@ struct SessionListView: View {
     @Environment(ServerStore.self) private var store
     @Environment(Navigation.self) private var nav
     @Environment(SessionOrganizer.self) private var org
+    @Environment(ProjectStore.self) private var projects
     @Environment(\.theme) private var theme
     @AppStorage("usageCollapsed") private var usageCollapsed = false
     @State private var query = ""
@@ -25,7 +26,7 @@ struct SessionListView: View {
     var body: some View {
         let mirrors = MirrorIndex(store.orderedConnections)
         let sections = store.orderedConnections.map {
-            SidebarBuilder.build($0, org: org, query: query, mirrors: mirrors, hits: content.hits(for: $0.id, query: query))
+            SidebarBuilder.build($0, org: org, query: query, starred: projects.starredFolders(on: $0.id), mirrors: mirrors, hits: content.hits(for: $0.id, query: query))
         }
         let merged = SidebarBuilder.merge(sections, org: org)
         List {
@@ -202,8 +203,10 @@ struct SessionListView: View {
                         ForEach(g.nodes) { n in tree(n, conn: conn) }
                     }
                 }
-                ForEach(section.projects) { p in projectRows(p, conn: conn) }
+                // Sessions outside starred projects come first, so they don't
+                // read as part of the last project.
                 ForEach(section.ungrouped) { n in tree(n, conn: conn) }
+                ForEach(section.projects) { p in projectRows(p, conn: conn) }
                 if (merged ? section.ungrouped.isEmpty && section.projects.isEmpty : section.isEmpty), conn.status == .online {
                     EmptyLine(text: org.filter == .recent ? tr("No activity in the last 3 days") : tr("No sessions"))
                 }

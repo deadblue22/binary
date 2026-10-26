@@ -150,6 +150,11 @@ final class ProjectStore {
     /// Starred projects in the order they were starred; ⌥⌘1…9 pick the first nine.
     var favorites: [Project] { projects.filter(\.starred) }
 
+    /// Folders of the starred projects on a server, as sessions are grouped by.
+    func starredFolders(on server: UUID) -> Set<String> {
+        Set(projects.filter { $0.starred && $0.server == server }.map { ProjectGroup.folder(of: $0.folder) })
+    }
+
     func projects(on server: UUID) -> [Project] {
         projects.filter { $0.server == server }
             .sorted { ($0.lastUsed ?? .distantPast, $1.name) > ($1.lastUsed ?? .distantPast, $0.name) }

@@ -5,6 +5,7 @@ struct SidebarView: View {
     @Environment(ServerStore.self) private var store
     @Environment(Navigation.self) private var nav
     @Environment(SessionOrganizer.self) private var org
+    @Environment(ProjectStore.self) private var projects
     @Environment(\.theme) private var theme
     /// Drop zones (group rows) currently under a drag, as "group|row" keys.
     @State private var dropHover: Set<String> = []
@@ -24,7 +25,7 @@ struct SidebarView: View {
     var body: some View {
         let mirrors = MirrorIndex(store.orderedConnections)
         let sections = store.orderedConnections.map {
-            SidebarBuilder.build($0, org: org, query: query, mirrors: mirrors, hits: content.hits(for: $0.id, query: query))
+            SidebarBuilder.build($0, org: org, query: query, starred: projects.starredFolders(on: $0.id), mirrors: mirrors, hits: content.hits(for: $0.id, query: query))
         }
         let merged = SidebarBuilder.merge(sections, org: org)
         let order = SidebarBuilder.visibleOrder(sections, merged: merged, org: org, showAll: showAllAgents)
@@ -392,8 +393,10 @@ struct SidebarView: View {
                     drop($0, conn) { refs in move(refs, to: "") }
                 }
             }
-            ForEach(section.projects) { p in projectView(p, conn: conn) }
+            // Sessions outside starred projects come first, so they don't
+            // read as part of the last project.
             ForEach(section.ungrouped) { n in tree(n, conn: conn) }
+            ForEach(section.projects) { p in projectView(p, conn: conn) }
             if (merged ? section.ungrouped.isEmpty && section.projects.isEmpty : section.isEmpty), conn.status == .online {
                 emptyLine(org.filter == .recent ? tr("No activity in the last 3 days") : tr("No sessions"))
             }
@@ -559,7 +562,7 @@ struct SidebarView: View {
         // pinned or grouped apart from its parent isn't under that parent.
         let mirrors = MirrorIndex(store.orderedConnections)
         let sections = store.orderedConnections.map {
-            SidebarBuilder.build($0, org: org, query: query, mirrors: mirrors, hits: content.hits(for: $0.id, query: query))
+            SidebarBuilder.build($0, org: org, query: query, starred: projects.starredFolders(on: $0.id), mirrors: mirrors, hits: content.hits(for: $0.id, query: query))
         }
         let place = SidebarBuilder.place(of: ref.sessionOnly, sections: sections, merged: SidebarBuilder.merge(sections, org: org))
         switch place?.area {

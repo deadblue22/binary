@@ -318,7 +318,7 @@ enum DebugHooks {
         }
         let org = SessionOrganizer()
         for c in store.orderedConnections {
-            lines.append("timing \(c.displayName) n=\(c.sessions.count) build=\(ms(20) { _ = SidebarBuilder.build(c, org: org, query: "") })")
+            lines.append("timing \(c.displayName) n=\(c.sessions.count) build=\(ms(20) { _ = SidebarBuilder.build(c, org: org, query: "", starred: []) })")
         }
         if let menu = NSApp.mainMenu {
             lines.append("menus: " + menu.items.map { $0.title }.joined(separator: " | "))
