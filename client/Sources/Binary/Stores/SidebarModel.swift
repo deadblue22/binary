@@ -337,8 +337,11 @@ enum SidebarBuilder {
     /// and the sessions come from a dictionary, so ties fall back to the id
     /// to keep rows from trading places on every update.
     static func sorter(_ sort: SessionSort) -> (SessionSummary, SessionSummary) -> Bool {
+        let now = Date()
         func recent(_ a: SessionSummary, _ b: SessionSummary) -> Bool {
-            a.updatedAt != b.updatedAt ? a.updatedAt > b.updatedAt : a.id < b.id
+            let x = recency(a, now), y = recency(b, now)
+            if x.justNow != y.justNow { return x.justNow }
+            return x.at != y.at ? x.at > y.at : a.id < b.id
         }
         switch sort {
         case .updated:
@@ -356,6 +359,25 @@ enum SidebarBuilder {
                 return r == .orderedSame ? recent(a, b) : r == .orderedAscending
             }
         }
+    }
+
+    /// Sessions all shown as "just now" keep their order while they go on
+    /// updating, so two busy ones don't swap places on every update: each
+    /// sorts by when it last became "just now", not by its latest update.
+    private static var justNowSince: [String: (since: Date, seen: Date)] = [:]
+
+    private static func recency(_ s: SessionSummary, _ now: Date) -> (justNow: Bool, at: Date) {
+        let u = s.updatedAt
+        guard now.timeIntervalSince(u) < Format.justNow else {
+            justNowSince[s.id] = nil
+            return (false, u)
+        }
+        if let e = justNowSince[s.id], u.timeIntervalSince(e.seen) < Format.justNow {
+            justNowSince[s.id] = (e.since, max(u, e.seen))
+            return (true, e.since)
+        }
+        justNowSince[s.id] = (u, u)
+        return (true, u)
     }
 
     /// Where a session's row is drawn: the area holding it and the rows it is

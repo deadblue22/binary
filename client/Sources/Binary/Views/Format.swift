@@ -6,11 +6,14 @@ import UIKit
 import SwiftUI
 
 enum Format {
+    /// How long after an update a time still reads "just now".
+    static let justNow: TimeInterval = 45
+
     /// "5 min ago"; `short` drops the "ago" ("5 min") for tight rows.
     static func relative(_ date: Date, short: Bool = false) -> String {
         guard date.timeIntervalSince1970 > 946_684_800 else { return "" }
         let s = Date().timeIntervalSince(date)
-        if s < 45 { return tr("just now") }
+        if s < justNow { return tr("just now") }
         if s < 3600 {
             let n = max(1, Int(s / 60))
             return short ? tr("\(n) min") : tr("\(n) min ago")
