@@ -191,7 +191,7 @@ struct StatusDot: View {
                 .frame(width: 8, height: 8)
             if state == .idle && !background {
                 Circle()
-                    .strokeBorder(live ? theme.c.success.opacity(0.8) : theme.c.textFaint.opacity(0.6), lineWidth: live ? 1.5 : 1)
+                    .strokeBorder(live ? theme.c.success.opacity(0.45) : theme.c.textFaint.opacity(0.6), lineWidth: 1)
                     .frame(width: 8, height: 8)
             }
         }
