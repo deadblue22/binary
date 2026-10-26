@@ -6,13 +6,17 @@ import UIKit
 import SwiftUI
 
 enum Format {
-    static func relative(_ date: Date) -> String {
+    /// "5 min ago"; `short` drops the "ago" ("5 min") for tight rows.
+    static func relative(_ date: Date, short: Bool = false) -> String {
         guard date.timeIntervalSince1970 > 946_684_800 else { return "" }
         let s = Date().timeIntervalSince(date)
         if s < 45 { return tr("just now") }
-        if s < 3600 { return tr("\(max(1, Int(s / 60))) min ago") }
-        if s < 86400 { return tr("\(Int(s / 3600)) h ago") }
-        if s < 86400 * 7 { return tr("\(Int(s / 86400)) d ago") }
+        if s < 3600 {
+            let n = max(1, Int(s / 60))
+            return short ? tr("\(n) min") : tr("\(n) min ago")
+        }
+        if s < 86400 { return short ? tr("\(Int(s / 3600)) h") : tr("\(Int(s / 3600)) h ago") }
+        if s < 86400 * 7 { return short ? tr("\(Int(s / 86400)) d") : tr("\(Int(s / 86400)) d ago") }
         return date.formatted(Date.FormatStyle().month().day().locale(locale))
     }
 

@@ -383,7 +383,7 @@ struct SessionRow: View {
                     .overlay(Capsule().strokeBorder(lit ? theme.c.selectionText.opacity(0.35) : theme.c.border))
                     .fixedSize()
             }
-            Text(Format.relative(s.updatedAt))
+            Text(Format.relative(s.updatedAt, short: true))
                 .font(theme.font(.rowMeta))
                 .foregroundStyle(lit ? theme.c.selectionText.opacity(0.72) : (nested ? theme.c.textFaint : theme.c.textMuted))
                 .fixedSize()
@@ -516,7 +516,7 @@ struct SubagentRow: View {
                 .layoutPriority(1)
             Spacer(minLength: 4)
             if let t = info.updatedAt ?? info.startedAt {
-                Text(Format.relative(t))
+                Text(Format.relative(t, short: true))
                     .font(theme.font(.rowMeta))
                     .foregroundStyle(selected ? theme.c.selectionText.opacity(0.72) : theme.c.textFaint)
                     .fixedSize()
