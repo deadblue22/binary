@@ -36,10 +36,19 @@ struct PlanWindowRow: View {
                     .foregroundStyle(theme.c.textMuted)
                     .frame(width: 48, alignment: .leading)
                 UsageBar(percent: window.percent)
-                Text("\(Int(window.percent.rounded()))%")
+                // Room for "100%" at any text size, so the bars line up and nothing wraps.
+                Text("100%")
                     .font(theme.font(.caption).monospacedDigit())
-                    .foregroundStyle(window.percent >= 80 ? theme.c.warning : theme.c.text)
-                    .frame(width: 36, alignment: .trailing)
+                    .lineLimit(1)
+                    .fixedSize()
+                    .hidden()
+                    .overlay(alignment: .trailing) {
+                        Text("\(Int(window.percent.rounded()))%")
+                            .font(theme.font(.caption).monospacedDigit())
+                            .foregroundStyle(window.percent >= 80 ? theme.c.warning : theme.c.text)
+                            .lineLimit(1)
+                            .fixedSize()
+                    }
             }
             if showReset, let r = Format.planReset(window) {
                 Text(r)

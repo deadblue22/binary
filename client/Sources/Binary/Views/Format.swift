@@ -63,7 +63,7 @@ enum Format {
         let when = d.timeIntervalSinceNow < 86_400
             ? d.formatted(Date.FormatStyle().hour().minute().locale(locale))
             : d.formatted(Date.FormatStyle().month(.defaultDigits).day().hour().minute().locale(locale))
-        return tr("resets \(when)") + " · " + relativeFuture(d)
+        return tr("resets \(when)") + countdown(to: d)
     }
 
     static func planWindowName(_ kind: String) -> String {
@@ -85,7 +85,12 @@ enum Format {
         let when = d.timeIntervalSinceNow < 86_400
             ? d.formatted(Date.FormatStyle().hour().minute().locale(locale))
             : d.formatted(Date.FormatStyle().month(.defaultDigits).day().locale(locale))
-        return pct + " · " + tr("resets \(when)") + " · " + relativeFuture(d)
+        return pct + " · " + tr("resets \(when)") + countdown(to: d)
+    }
+
+    /// " · in 3 h 12 min", or nothing once the time has passed (the usage is stale).
+    private static func countdown(to d: Date) -> String {
+        d.timeIntervalSinceNow > 0 ? " · " + relativeFuture(d) : ""
     }
 
     static func duration(_ ms: Int64?) -> String? {
