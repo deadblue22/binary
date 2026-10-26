@@ -199,7 +199,7 @@ struct NewSessionView: View {
             .shadow(color: theme.c.shadow, radius: focused ? 8 : 4, y: 2)
             .contentShape(shape)
             .onTapGesture { focused = true }
-            .slashCommands(text: $text, focused: focused, conn: conn, cwd: folder.isEmpty ? nil : folder, run: create)
+            .slashCommands(text: $text, focused: focused, conn: conn, cwd: folder.isEmpty ? nil : folder)
             controls
                 .padding(.horizontal, 4)
         }

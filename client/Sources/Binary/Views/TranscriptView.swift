@@ -149,6 +149,9 @@ struct TranscriptView<Source: TranscriptSource>: View {
                     let visible = v.inView <= geo.size.height + 40
                     if visible {
                         atBottom = true
+                        // All rows fit (their top is in view too): nothing to
+                        // scroll toward the top, so fetch the earlier ones now.
+                        if v.inView - v.inContent >= 0 { showEarlier() }
                     } else if userScrolling {
                         atBottom = false
                     } else if resized || (!grew && ScrollPhaseWatcher.available) {

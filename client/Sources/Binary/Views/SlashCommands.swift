@@ -57,11 +57,11 @@ final class SlashSuggestions {
 
 extension View {
     /// Offers slash commands above a message box while its text starts with
-    /// "/". Picking one fills in its name; on a Mac ↑↓ choose, ⇥ fills in, ↩
-    /// runs a command that takes no arguments (`run` sends the box), ⎋ closes.
+    /// "/". Picking one fills in its name; on a Mac ↑↓ choose, ⇥ or ↩ fills
+    /// in, ↩ again sends the box, ⎋ closes.
     func slashCommands(text: Binding<String>, focused: Bool, conn: ServerConnection?,
-                       session: String? = nil, cwd: String? = nil, run: @escaping () -> Void) -> some View {
-        modifier(SlashMenuModifier(text: text, focused: focused, conn: conn, session: session, cwd: cwd, run: run))
+                       session: String? = nil, cwd: String? = nil) -> some View {
+        modifier(SlashMenuModifier(text: text, focused: focused, conn: conn, session: session, cwd: cwd))
     }
 }
 
@@ -71,7 +71,6 @@ private struct SlashMenuModifier: ViewModifier {
     let conn: ServerConnection?
     let session: String?
     let cwd: String?
-    let run: () -> Void
     @State private var s = SlashSuggestions()
     #if os(macOS)
     @State private var keys = MenuKeys()
@@ -113,11 +112,10 @@ private struct SlashMenuModifier: ViewModifier {
     }
 
     /// A command that takes arguments gets its name and a space; one that
-    /// doesn't is sent as it is.
+    /// doesn't gets just its name, so the next ↩ sends it.
     private func accept(_ c: SlashCommand) {
         if (c.argumentHint ?? "").isEmpty {
             text = "/" + c.name
-            DispatchQueue.main.async(execute: run)
         } else {
             complete(c)
         }
@@ -140,7 +138,10 @@ private struct SlashMenuModifier: ViewModifier {
         case 125: s.selected = (selected + 1) % shown.count       // ↓
         case 126: s.selected = (selected - 1 + shown.count) % shown.count // ↑
         case 48: complete(shown[selected])                      // Tab
-        case 36, 76: accept(shown[selected])                    // Return, keypad Enter
+        case 36, 76:                                            // Return, keypad Enter
+            // Already filled in: the box sends it.
+            if text == "/" + shown[selected].name { return false }
+            accept(shown[selected])
         default: return false
         }
         return true
@@ -224,7 +225,7 @@ private struct SlashMenu: View {
 
     private var footer: String {
         #if os(macOS)
-        tr("\(selected + 1) of \(commands.count) · ↑↓ to choose, ⇥ to fill in, ↩ to run")
+        tr("\(selected + 1) of \(commands.count) · ↑↓ to choose, ↩ to fill in, ↩ again to send")
         #else
         tr("\(commands.count) commands · keep typing to narrow them down")
         #endif
