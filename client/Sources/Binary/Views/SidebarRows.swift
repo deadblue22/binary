@@ -16,7 +16,7 @@ struct ServerHeader: View {
     @State private var hover = false
 
     /// Sessions with a turn running, here or in another program.
-    private var busy: Int { conn.sessions.values.filter { ($0.status.isBusy || $0.shownState == .external) && !hidden.contains($0.id) }.count }
+    private var busy: Int { conn.sessions.values.filter { ($0.shownState.isBusy || $0.shownState == .external) && !hidden.contains($0.id) }.count }
     private var total: Int { conn.sessions.count - hidden.count }
 
     var body: some View {
@@ -338,7 +338,7 @@ struct SessionRow: View {
             }
             disclosure
             if !nested {
-                StatusDot(state: s.shownState, live: s.live)
+                StatusDot(state: s.shownState, live: s.live, background: s.hasBackgroundWork)
             }
             Text(s.title)
                 .font(theme.font(.rowTitle).weight(selected ? .medium : .regular))
@@ -383,7 +383,9 @@ struct SessionRow: View {
                 Circle().fill(nestedDotColor)
                     .frame(width: 6, height: 6)
                     .padding(.trailing, 2)
-                    .help(s.shownState == .idle && s.live ? tr("Idle · process running") : s.statusText)
+                    .help(s.shownState != .idle ? s.statusText
+                          : s.hasBackgroundWork ? tr("Idle · background tasks running")
+                          : s.live ? tr("Idle · process running") : s.statusText)
             }
         }
         .padding(.vertical, nested ? 4 : 6)
@@ -429,7 +431,9 @@ struct SessionRow: View {
         case .waiting: return theme.c.warning
         case .error: return theme.c.danger.opacity(0.8)
         case .external: return theme.c.external.opacity(0.85)
-        default: return lit ? theme.c.selectionText.opacity(0.6) : theme.c.textFaint.opacity(s.live ? 0.9 : 0.55)
+        default:
+            if s.hasBackgroundWork { return theme.c.success.opacity(0.85) }
+            return lit ? theme.c.selectionText.opacity(0.6) : theme.c.textFaint.opacity(s.live ? 0.9 : 0.55)
         }
     }
 

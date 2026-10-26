@@ -170,9 +170,13 @@ extension SessionState {
 /// Says only whether you can talk to the session now: working (pulse),
 /// needs you (orange), idle. Pass `SessionSummary.shownState`, so a session
 /// another program has open looks idle unless a turn runs there (purple).
+/// Idle splits three ways: a background shell or monitor still running
+/// (filled green), a process that is merely open (green ring), no process.
 struct StatusDot: View {
     let state: SessionState
     let live: Bool
+    /// Idle, but background tasks still run (`SessionSummary.hasBackgroundWork`).
+    var background = false
     @Environment(\.theme) private var theme
 
     private var active: Bool { state == .running || state == .starting || state == .external }
@@ -185,8 +189,10 @@ struct StatusDot: View {
             Circle()
                 .fill(fill)
                 .frame(width: 8, height: 8)
-            if state == .idle && !live {
-                Circle().strokeBorder(theme.c.textFaint.opacity(0.6), lineWidth: 1).frame(width: 8, height: 8)
+            if state == .idle && !background {
+                Circle()
+                    .strokeBorder(live ? theme.c.success.opacity(0.8) : theme.c.textFaint.opacity(0.6), lineWidth: live ? 1.5 : 1)
+                    .frame(width: 8, height: 8)
             }
         }
         .frame(width: 14, height: 14)
@@ -194,11 +200,13 @@ struct StatusDot: View {
     }
 
     private var helpText: String {
-        state.label + (state == .idle && live ? tr(" · process running") : "")
+        guard state == .idle else { return state.label }
+        if background { return state.label + tr(" · background tasks running") }
+        return state.label + (live ? tr(" · process running") : "")
     }
 
     private var fill: Color {
-        if state == .idle { return live ? theme.c.success : .clear }
+        if state == .idle { return background ? theme.c.success : .clear }
         return state.color(theme)
     }
 }
@@ -324,18 +332,25 @@ struct StatusPill: View {
     let live: Bool
     /// The program a turn is running in, named in the pill.
     var hold: ExternalHold? = nil
+    /// Idle, but background tasks still run.
+    var background = false
+    /// Replaces the state's own label (`SessionSummary.statusText`).
+    var text: String? = nil
     @Environment(\.theme) private var theme
 
     private var label: String {
+        if let text, state != .idle { return text }
         if state == .external, let h = hold {
             return tr("Working in \(h.shortName)")
         }
-        return state == .idle && live ? tr("Idle · process running") : state.label
+        guard state == .idle else { return state.label }
+        if background { return tr("Idle · background tasks running") }
+        return live ? tr("Idle · process running") : state.label
     }
 
     var body: some View {
         HStack(spacing: 5) {
-            StatusDot(state: state, live: live)
+            StatusDot(state: state, live: live, background: background)
             Text(label)
         }
         .font(theme.font(.caption).weight(.medium))

@@ -26,6 +26,7 @@ import { lastMessageAt } from './activity.js';
 import { runningTasks } from './bgtasks.js';
 import { resumeNote, saveInterrupted, takeInterrupted, type Interrupted } from './restart.js';
 import { activeAgents, type ActiveAgent } from './claude.js';
+import { CommandProbe, toCommands, type Command } from './commands.js';
 import type { Config } from './config.js';
 import { DesktopLinks } from './desktop.js';
 import { holderOf, processTable, type Holder } from './holders.js';
@@ -321,6 +322,9 @@ export class Manager implements SessionHost, SessionToolHost {
   private dirChecks = new Map<string, { exists: boolean; at: number }>();
   private lister = new SessionLister();
   private searcher = new SessionSearch();
+  private probe: CommandProbe;
+  /** Slash commands only a terminal can run, as sessions' init messages name them. */
+  private terminalCommands = new Set<string>();
   private tempDirs: string[];
   readonly logFn: (msg: string) => void;
 
@@ -332,6 +336,7 @@ export class Manager implements SessionHost, SessionToolHost {
     this.logFn = opts.log ?? ((m) => console.log(`${new Date().toISOString()} ${m}`));
     this.desktop = new DesktopLinks(opts.desktopDir);
     this.tempDirs = opts.tempDirs ?? tempRoots();
+    this.probe = new CommandProbe((cwd) => this.probeOptions(cwd), this.logFn);
   }
 
   log(msg: string): void {
@@ -352,6 +357,32 @@ export class Manager implements SessionHost, SessionToolHost {
 
   onModels(models: unknown[]): void {
     if (models.length) this.store.setModels(models);
+  }
+
+  onTerminalCommands(names: string[]): void {
+    this.terminalCommands = new Set(names);
+  }
+
+  /**
+   * Slash commands for a session (its live process's list), or for a folder:
+   * the session's, else the one given (a session not created yet).
+   */
+  async commands(id: string | undefined, cwd: string | undefined): Promise<Command[]> {
+    const s = id ? this.session(id) : undefined;
+    if (id && !s) throw new HttpError(404, T('sessionNotFound'));
+    const dir = (id && this.cwdFor(id)) || s?.cwd || (cwd && expandPath(cwd)) || homedir();
+    const list = s?.slashCommands ?? (await this.probe.read(dir));
+    return toCommands(list, this.terminalCommands);
+  }
+
+  /** A process that only starts up and answers (no prompt, no model call). */
+  private probeOptions(cwd: string): Options {
+    return {
+      cwd,
+      env: this.opts.env,
+      systemPrompt: { type: 'preset', preset: 'claude_code' },
+      ...(this.opts.claudePath ? { pathToClaudeCodeExecutable: this.opts.claudePath } : {}),
+    };
   }
 
   // ------------------------------------------------------------ loops
@@ -670,15 +701,7 @@ export class Manager implements SessionHost, SessionToolHost {
     }
     if (!u) {
       const input = { async *[Symbol.asyncIterator]() { await new Promise(() => undefined); } } as AsyncIterable<SDKUserMessage>;
-      const q = query({
-        prompt: input,
-        options: {
-          cwd: homedir(),
-          env: this.opts.env,
-          systemPrompt: { type: 'preset', preset: 'claude_code' },
-          ...(this.opts.claudePath ? { pathToClaudeCodeExecutable: this.opts.claudePath } : {}),
-        },
-      });
+      const q = query({ prompt: input, options: this.probeOptions(homedir()) });
       try {
         await Promise.race([q.initializationResult(), new Promise((_, no) => setTimeout(() => no(new Error('timeout')), 60_000).unref())]);
         u = await readPlanUsage(q);

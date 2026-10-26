@@ -185,10 +185,13 @@ struct ExternalHold: Codable, Hashable, Sendable {
 
 extension SessionSummary {
     /// The state as shown: a session another program has open looks idle
-    /// unless a turn is running there.
+    /// unless a turn is running there, and one whose turn has ended still
+    /// counts as working while a subagent or workflow it started runs on.
     var shownState: SessionState {
-        guard status == .external, let x = external else { return status }
-        return x.working ? .external : .idle
+        var s = status
+        if s == .external, let x = external { s = x.working ? .external : .idle }
+        guard s == .idle, agentTasks > 0 else { return s }
+        return hold == nil ? .running : .external
     }
 
     /// Held by another program (newer servers say which).
@@ -196,8 +199,15 @@ extension SessionSummary {
 
     /// Status in words. A turn running elsewhere names the program.
     var statusText: String {
-        guard let x = hold else { return status.label }
-        return x.working ? tr("Working in \(x.shortName)") : SessionState.idle.label
+        let shown = shownState
+        if let x = hold {
+            return shown == .external ? tr("Working in \(x.shortName)") : SessionState.idle.label
+        }
+        if shown == .running && status == .idle {
+            let n = agentTasks
+            return tr("\(n) subagent\(n == 1 ? "" : "s") running")
+        }
+        return status.label
     }
 
     /// "Held by Claude desktop · idle" for tooltips.
@@ -221,6 +231,14 @@ struct BackgroundTask: Codable, Identifiable, Hashable, Sendable {
 extension SessionSummary {
     /// Background tasks that are real work, not housekeeping.
     var busyTasks: [BackgroundTask] { (tasks ?? []).filter { $0.ambient != true } }
+
+    /// Subagents and workflows still running in the background: Claude's own
+    /// work, unlike a shell or monitor it left behind.
+    var agentTasks: Int { busyTasks.filter { $0.type == "subagent" || $0.type == "workflow" }.count }
+
+    /// Idle, but a background shell, monitor or agent still runs: worth a look,
+    /// unlike a process that is merely open.
+    var hasBackgroundWork: Bool { !busyTasks.isEmpty }
 }
 
 struct QueuedMessage: Codable, Identifiable, Hashable, Sendable {
@@ -248,6 +266,19 @@ struct SubagentInfo: Decodable, Identifiable, Hashable, Sendable {
 
 struct SubagentsResponse: Decodable { var subagents: [SubagentInfo] }
 struct EntriesResponse: Decodable { var entries: [Entry] }
+
+/// A slash command Claude Code offers: its own, or a command or skill of the
+/// user, the project, a plugin or an MCP server.
+struct SlashCommand: Decodable, Hashable, Identifiable, Sendable {
+    var name: String
+    var description: String
+    var argumentHint: String?
+    var aliases: [String]?
+    var builtin: Bool?
+    var id: String { name }
+}
+
+struct CommandsResponse: Decodable { var commands: [SlashCommand] }
 
 struct Block: Codable, Hashable, Sendable {
     var type: String

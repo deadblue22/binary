@@ -64,6 +64,16 @@ const ask = (request) =>
     emit({ type: 'control_request', request_id: id, request });
   });
 
+const COMMANDS = [
+  { name: 'compact', description: 'Summarize the conversation', argumentHint: '<instructions>', builtin: true },
+  { name: 'review', description: 'A user command named like an alias', argumentHint: '' },
+  { name: 'code-review', description: 'Review the diff', argumentHint: '[<pr#>]', aliases: ['review'], builtin: true },
+  { name: 'exit', description: 'Exit the REPL', argumentHint: '', builtin: true },
+  { name: '__internal', description: 'Not for people', argumentHint: '' },
+  { name: 'my-skill', description: 'A user skill (user)', argumentHint: '' },
+  { name: 'compact', description: 'A user command shadowed by the builtin', argumentHint: '' },
+];
+
 const turns = [];
 let busy = false;
 let interrupted = false;
@@ -74,7 +84,10 @@ async function runTurn(msg) {
   const content = msg.message.content;
   const text = typeof content === 'string' ? content : content.filter((b) => b.type === 'text').map((b) => b.text).join('\n');
   persist({ type: 'user', uuid: msg.uuid ?? randomUUID(), message: { role: 'user', content } });
-  emit({ type: 'system', subtype: 'init', session_id: sid, model, permissionMode: 'default', uuid: randomUUID() });
+  emit({ type: 'system', subtype: 'init', session_id: sid, model, permissionMode: 'default', terminal_slash_commands: ['exit'], uuid: randomUUID() });
+  if (text.includes('new skill')) {
+    emit({ type: 'system', subtype: 'commands_changed', session_id: sid, uuid: randomUUID(), commands: [...COMMANDS, { name: 'found', description: 'Found in a subfolder', argumentHint: '' }] });
+  }
 
   if (text.includes('permission')) {
     const use = { type: 'assistant', uuid: randomUUID(), session_id: sid, parent_tool_use_id: null, message: { id: 'msg_tool', model, role: 'assistant', content: [{ type: 'tool_use', id: 'toolu_1', name: 'Write', input: { file_path: '/tmp/x', content: 'x' } }] } };
@@ -138,7 +151,7 @@ rl.on('line', (line) => {
     const req = msg.request ?? {};
     if (req.subtype === 'initialize') {
       respond(msg.request_id, {
-        commands: [],
+        commands: COMMANDS,
         agents: [],
         output_style: 'default',
         available_output_styles: ['default'],

@@ -14,6 +14,7 @@ import {
   type PermissionUpdate,
   type Query,
   type SDKUserMessage,
+  type SlashCommand,
 } from '@anthropic-ai/claude-agent-sdk';
 import { DEFAULT_LANG, errorText, LocalizedError, render, T, Text, type Lang, type Msg } from './i18n.js';
 import { event, Log, Subscriber, type Event, type Sink } from './log.js';
@@ -91,6 +92,8 @@ export interface SettingsUpdate {
 export interface SessionHost {
   queryOptions(s: Session): Promise<Options>;
   onModels(models: unknown[]): void;
+  /** Slash commands Claude Code says only a terminal can run. */
+  onTerminalCommands?(names: string[]): void;
   markDirty(id: string): void;
   summaryJSON(s: Session): unknown;
   log(msg: string): void;
@@ -249,6 +252,7 @@ export class Session {
   restart = false;
   /** Working directory, known once the manager resolved it. */
   cwd = '';
+  private commands?: SlashCommand[];
 
   // transcript
   log = new Log();
@@ -293,6 +297,11 @@ export class Session {
     readonly id: string,
     private readonly host: SessionHost,
   ) {}
+
+  /** Slash commands, as the live process last reported them. */
+  get slashCommands(): SlashCommand[] | undefined {
+    return this.proc ? this.commands : undefined;
+  }
 
   get live(): boolean {
     return this.proc !== undefined;
@@ -576,6 +585,7 @@ export class Session {
     try {
       const init = await withTimeout(q.initializationResult(), 120_000, T('initTimeout'));
       if (Array.isArray(init.models)) this.host.onModels(init.models);
+      if (Array.isArray(init.commands)) this.commands = init.commands;
     } catch (err) {
       proc.closing = true;
       q.close();
@@ -939,7 +949,12 @@ export class Session {
       case 'init':
         if (str('permissionMode')) this.liveMode = str('permissionMode');
         if (str('model')) this.lastModel = str('model');
+        if (Array.isArray(msg.terminal_slash_commands)) this.host.onTerminalCommands?.(msg.terminal_slash_commands as string[]);
         return true;
+      case 'commands_changed':
+        // The full list, e.g. after skills turned up in a subfolder.
+        if (Array.isArray(msg.commands)) this.commands = msg.commands as SlashCommand[];
+        return false;
       case 'status':
         if (str('permissionMode')) this.liveMode = str('permissionMode');
         if (msg.status === 'compacting') this.activity = T('compacting');

@@ -147,6 +147,12 @@ export function createHandler(o: ApiOptions): (req: IncomingMessage, res: Server
     return ok({ results: q ? await m.search(q, limit) : [] });
   });
 
+  // Slash commands for the message box: a session's (?session=), or a
+  // folder's for a session not created yet (?cwd=).
+  route('GET', '/api/v1/commands', async ({ url }) =>
+    ok({ commands: await m.commands(url.searchParams.get('session') || undefined, url.searchParams.get('cwd') || undefined) }),
+  );
+
   route('POST', '/api/v1/sessions', async ({ req }) => ok(await m.create(await readJSON(req)), 201));
 
   route('GET', '/api/v1/sessions/{id}', ({ params }) => {

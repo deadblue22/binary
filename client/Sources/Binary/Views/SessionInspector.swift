@@ -63,7 +63,7 @@ struct SessionInspector: View {
     private func sessionCard(_ s: SessionSummary) -> some View {
         InspectorCard(title: tr("Session")) {
             HStack(spacing: 8) {
-                StatusPill(state: s.shownState, live: s.live, hold: s.hold)
+                StatusPill(state: s.shownState, live: s.live, hold: s.hold, background: s.hasBackgroundWork, text: s.statusText)
                 if s.live, let pid = s.pid {
                     Text("pid " + String(pid))
                         .font(theme.mono(theme.size(.small)))
@@ -129,7 +129,7 @@ struct SessionInspector: View {
         let tasks = (s.tasks ?? []).sorted { ($0.ambient == true ? 1 : 0, $0.startedAt ?? .distantPast) < ($1.ambient == true ? 1 : 0, $1.startedAt ?? .distantPast) }
         let busy = s.busyTasks.count
         return InspectorCard(title: tr("Process"), trailing: busy > 0 ? tr("\(busy) running") : nil) {
-            if s.shownState != .idle {
+            if s.status != .idle {
                 InfoRow(icon: "bolt.horizontal.circle", label: tr("Turn"), value: s.statusText)
             }
             ForEach(tasks) { t in

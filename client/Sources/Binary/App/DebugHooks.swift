@@ -26,7 +26,7 @@ import AppKit
 ///   BINARY_ATTACH=<a.png,b.jpg>    put these images in the composer
 ///   BINARY_SEND_TEXT=<text>        type this in the composer and press return
 ///   BINARY_KEYS=<steps>            after 3 s, feed the focused field steps split by "|":
-///                                  ⇧↩, ↩, ⇥, ⌘[, ⌘], mark:<text> (input-method candidates), or text
+///                                  ⇧↩, ↩, ⇥, ↑, ↓, ⎋, ⌘[, ⌘], mark:<text> (input-method candidates), or text
 ///   BINARY_EFFORT_PANEL=1          open the effort panel 2.5 s after launch
 ///   BINARY_LOAD_OLDER=1            fetch earlier messages 2.5 s after a session opens
 ///   BINARY_PROJECT_PICKER=1        with BINARY_NEW_SESSION: open the project list
@@ -210,6 +210,9 @@ enum DebugHooks {
         case "⇧↩": return key("\r", 36, .shift)
         case "↩": return key("\r", 36)
         case "⇥": return key("\t", 48)
+        case "↑": return key("\u{F700}", 126, [.numericPad, .function])
+        case "↓": return key("\u{F701}", 125, [.numericPad, .function])
+        case "⎋": return key("\u{1B}", 53)
         case "⌘[": return key("[", 33, .command)
         case "⌘]": return key("]", 30, .command)
         default: break

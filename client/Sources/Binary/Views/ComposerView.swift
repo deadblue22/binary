@@ -144,6 +144,7 @@ struct ComposerView: View {
             .shadow(color: theme.c.shadow, radius: focused ? 8 : 4, y: 2)
             .contentShape(shape)
             .onTapGesture { focused = true }
+            .slashCommands(text: $text, focused: focused, conn: controller.conn, session: controller.id, run: submit)
             SessionControls(controller: controller)
                 .padding(.horizontal, 4)
         }
@@ -395,7 +396,7 @@ struct SessionControls: View {
                     #endif
                 } label: {
                     HStack(spacing: 4) {
-                        StatusDot(state: s.shownState, live: s.live)
+                        StatusDot(state: s.shownState, live: s.live, background: s.hasBackgroundWork)
                         if d == .full { Text(label) }
                     }
                     .contentShape(Rectangle())

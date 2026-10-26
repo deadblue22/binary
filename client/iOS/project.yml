@@ -59,6 +59,8 @@ targets:
         group: Shared/Views
       - path: ../Sources/Binary/Views/SessionInspector.swift
         group: Shared/Views
+      - path: ../Sources/Binary/Views/SlashCommands.swift
+        group: Shared/Views
       - path: ../Sources/Binary/Views/Theme.swift
         group: Shared/Views
       - path: ../Sources/Binary/Views/ToolCallView.swift

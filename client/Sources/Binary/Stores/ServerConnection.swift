@@ -337,6 +337,14 @@ final class ServerConnection: Identifiable {
         }
     }
 
+    /// Slash commands for a session, or for a folder before its session exists.
+    func slashCommands(session: String?, cwd: String?) async -> [SlashCommand]? {
+        var q: [String: String] = [:]
+        if let session { q["session"] = session } else if let cwd { q["cwd"] = cwd }
+        let r: CommandsResponse? = try? await requireAPI().get("/commands", query: q)
+        return r?.commands
+    }
+
     func gitInfo(_ path: String) async -> GitInfo? {
         try? await requireAPI().get("/fs/git", query: ["path": path])
     }
