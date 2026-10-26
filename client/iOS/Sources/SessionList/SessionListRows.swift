@@ -166,12 +166,17 @@ struct SessionListRow: View {
     /// What it's doing while it works or waits, or why it failed.
     private var detail: String? {
         if let x = s.hold, x.working { return s.statusText }
+        if s.shownState != .idle && !s.status.isBusy && s.status != .error {
+            // Only background subagents keep it working.
+            return s.statusText
+        }
         if s.status.isBusy {
             if let a = s.activity, !a.isEmpty { return a }
             return s.status.label
         }
         if s.status == .error { return s.error.flatMap { $0.isEmpty ? nil : $0 } ?? s.status.label }
-        return nil
+        let bg = s.busyTasks.count
+        return bg > 0 ? tr("\(bg) background task\(bg == 1 ? "" : "s")") : nil
     }
 
     private var detailColor: Color {
@@ -257,18 +262,21 @@ struct RowButtonStyle: ButtonStyle {
 }
 
 /// A session's state on the screen's edge: blue (pulsing) while it works,
-/// orange while it waits for you, red after an error, green while idle with
-/// its process still open, nothing when idle and closed.
+/// orange while it waits for you, red after an error; while idle, green when
+/// a background task still runs, faint green when the process is merely
+/// open, nothing when it is closed.
 struct StatusStripe: View {
     let state: SessionState?
     var live = false
+    /// Idle, but background tasks still run (`SessionSummary.hasBackgroundWork`).
+    var background = false
     @Environment(\.theme) private var theme
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     private var color: Color? {
         switch state {
         case nil: return nil
-        case .idle?: return live ? theme.c.success : nil
+        case .idle?: return background ? theme.c.success : live ? theme.c.success.opacity(0.3) : nil
         case let s?: return s.color(theme)
         }
     }
@@ -337,13 +345,14 @@ final class BreathingBarView: UIView {
 private struct SessionRowStyle: ViewModifier {
     let state: SessionState?
     let live: Bool
+    let background: Bool
     let bottomSeparator: Bool
     @Environment(\.theme) private var theme
 
     func body(content: Content) -> some View {
         content
             .listRowInsets(EdgeInsets(top: 0, leading: 16, bottom: 0, trailing: 0))
-            .listRowBackground(StatusStripe(state: state, live: live))
+            .listRowBackground(StatusStripe(state: state, live: live, background: background))
             .listRowSeparator(.visible, edges: .top)
             .listRowSeparator(bottomSeparator ? .visible : .hidden, edges: .bottom)
             .listRowSeparatorTint(theme.c.border)
@@ -353,8 +362,8 @@ private struct SessionRowStyle: ViewModifier {
 extension View {
     /// A session or subagent row; `bottomSeparator: false` keeps what
     /// follows (search matches) attached to it.
-    func sessionRow(state: SessionState?, live: Bool = false, bottomSeparator: Bool = true) -> some View {
-        modifier(SessionRowStyle(state: state, live: live, bottomSeparator: bottomSeparator))
+    func sessionRow(state: SessionState?, live: Bool = false, background: Bool = false, bottomSeparator: Bool = true) -> some View {
+        modifier(SessionRowStyle(state: state, live: live, background: background, bottomSeparator: bottomSeparator))
     }
 
     /// Tight rows on the list's own background, like the Mac sidebar.

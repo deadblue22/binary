@@ -296,7 +296,7 @@ struct SessionListView: View {
                     .tint(theme.c.textMuted)
                 }
                 .contextMenu { sessionMenu(n, conn) }
-                .sessionRow(state: n.session.shownState, live: n.session.live, bottomSeparator: n.hit == nil)
+                .sessionRow(state: n.session.shownState, live: n.session.live, background: n.session.hasBackgroundWork, bottomSeparator: n.hit == nil)
                 .task(id: expanded && (n.session.subagentCount ?? 0) > 0 ? "\(n.session.id)|\(n.session.updatedAt.timeIntervalSince1970)" : "") {
                     guard expanded, (n.session.subagentCount ?? 0) > 0 else { return }
                     await conn.loadSubagents(n.session.id)
