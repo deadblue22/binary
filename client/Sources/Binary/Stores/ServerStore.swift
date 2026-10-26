@@ -32,10 +32,9 @@ final class ServerStore {
         didSet { for c in connections.values { c.onTransition = onTransition } }
     }
 
-    /// Forwarded to every connection; keeps the organizer in step with the servers.
-    @ObservationIgnored var onLayout: ((ServerConnection, SharedLayout) -> Void)? {
-        didSet { for c in connections.values { c.onLayout = onLayout } }
-    }
+    /// Called with every server's layout as it arrives; the organizer and the
+    /// projects follow the servers through it.
+    @ObservationIgnored private var layoutObservers: [(ServerConnection, SharedLayout) -> Void] = []
 
     private let fileURL = ClientFiles.url("servers.json")
 
@@ -53,6 +52,15 @@ final class ServerStore {
     }
 
     func connection(_ id: UUID) -> ServerConnection? { connections[id] }
+
+    /// Calls `f` with each server's layout from now on, starting with those
+    /// already received.
+    func observeLayouts(_ f: @escaping (ServerConnection, SharedLayout) -> Void) {
+        layoutObservers.append(f)
+        for c in orderedConnections {
+            if let l = c.layout { f(c, l) }
+        }
+    }
 
     func add(_ config: ServerConfig) {
         servers.append(config)
@@ -83,7 +91,7 @@ final class ServerStore {
     private func connect(_ config: ServerConfig) {
         let conn = ServerConnection(config: config)
         conn.onTransition = onTransition
-        conn.onLayout = onLayout
+        conn.onLayout = { [weak self] c, l in self?.layoutObservers.forEach { $0(c, l) } }
         connections[config.id] = conn
         conn.start()
     }

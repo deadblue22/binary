@@ -112,7 +112,9 @@ test('event stream starts with a snapshot', async () => {
 
 test('layout: newest change per field wins, shared over the event stream', async () => {
   const empty = await call('GET', '/api/v1/layout');
-  assert.deepEqual(empty.json.layout, { pinned: [], archived: [], groupOrder: [], at: { pinned: 0, archived: 0, groupOrder: 0 } });
+  assert.deepEqual(empty.json.layout, {
+    pinned: [], archived: [], groupOrder: [], projects: [], at: { pinned: 0, archived: 0, groupOrder: 0, projects: 0 },
+  });
 
   const set = await call('PUT', '/api/v1/layout', { pinned: ['a', 'b', 'a'], groupOrder: ['g2', 'g1'], at: { pinned: 200, groupOrder: 200 } });
   assert.equal(set.status, 200);
@@ -120,10 +122,19 @@ test('layout: newest change per field wins, shared over the event stream', async
   // An older change (from a client that was offline) doesn't undo a newer one; other fields still apply.
   const stale = await call('PUT', '/api/v1/layout', { pinned: ['c'], archived: ['x'], at: { pinned: 100, archived: 100 } });
   assert.deepEqual(stale.json.layout, {
-    pinned: ['a', 'b'], archived: ['x'], groupOrder: ['g2', 'g1'], at: { pinned: 200, archived: 100, groupOrder: 200 },
+    pinned: ['a', 'b'], archived: ['x'], groupOrder: ['g2', 'g1'], projects: [], at: { pinned: 200, archived: 100, groupOrder: 200, projects: 0 },
   });
   assert.equal((await call('PUT', '/api/v1/layout', { pinned: 'a' })).status, 400);
   assert.equal((await call('PUT', '/api/v1/layout', { archived: [1] })).status, 400);
+
+  // Projects are kept as clients send them, the newest list winning.
+  const proj = { id: 'p1', name: 'binary', folder: '/src/binary', starred: true, env: [{ key: 'A', value: 'b' }] };
+  const withProjects = await call('PUT', '/api/v1/layout', { projects: [proj], at: { projects: 300 } });
+  assert.deepEqual((withProjects.json.layout as Layout).projects, [proj]);
+  const older = await call('PUT', '/api/v1/layout', { projects: [], at: { projects: 250 } });
+  assert.deepEqual((older.json.layout as Layout).projects, [proj]);
+  assert.equal((await call('PUT', '/api/v1/layout', { projects: [{ name: 'no id' }] })).status, 400);
+  assert.equal((await call('PUT', '/api/v1/layout', { projects: ['p1'] })).status, 400);
 
   // Clients get it right after the session list, and again whenever it changes.
   const ctrl = new AbortController();

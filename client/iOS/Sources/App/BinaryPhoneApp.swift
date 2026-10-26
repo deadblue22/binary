@@ -23,6 +23,7 @@ struct BinaryPhoneApp: App {
                 .onAppear {
                     PhoneNotifier.shared.attach(store: store, nav: nav)
                     organizer.sync(with: store)
+                    projects.sync(with: store)
                     PhoneDebugHooks.run(store: store, nav: nav, appearance: appearance)
                 }
         }

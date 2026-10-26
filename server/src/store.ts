@@ -36,13 +36,16 @@ export interface SessionRecord {
 
 /**
  * How clients organize this server's sessions beyond groups (which are
- * session tags): pinned and archived sessions and the order of groups, kept
- * here so every client shows the same.
+ * session tags): pinned and archived sessions, the order of groups and the
+ * projects (folders here with settings for new sessions), kept here so every
+ * client shows the same.
  */
 export interface Layout {
   pinned: string[];
   archived: string[];
   groupOrder: string[];
+  /** Kept as clients send them: objects with at least a string `id`. */
+  projects: Record<string, unknown>[];
   /** When each field was last set, by the setting client's clock (ms); 0 = never. */
   at: LayoutStamps;
 }
@@ -51,6 +54,7 @@ export interface LayoutStamps {
   pinned: number;
   archived: number;
   groupOrder: number;
+  projects: number;
 }
 
 export const LAYOUT_FIELDS = ['pinned', 'archived', 'groupOrder'] as const;
@@ -103,7 +107,8 @@ export class Store {
       pinned: [...(l?.pinned ?? [])],
       archived: [...(l?.archived ?? [])],
       groupOrder: [...(l?.groupOrder ?? [])],
-      at: { pinned: 0, archived: 0, groupOrder: 0, ...l?.at },
+      projects: (l?.projects ?? []).map((p) => ({ ...p })),
+      at: { pinned: 0, archived: 0, groupOrder: 0, projects: 0, ...l?.at },
     };
   }
 

@@ -25,6 +25,7 @@ struct BinaryApp: App {
                     appearance.apply()
                     Notifier.shared.attach(store: store, nav: nav)
                     organizer.sync(with: store)
+                    projects.sync(with: store)
                     DebugHooks.run(store: store, nav: nav, appearance: appearance)
                 }
         }

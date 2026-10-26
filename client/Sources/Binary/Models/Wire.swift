@@ -450,20 +450,60 @@ struct GitWorktree: Decodable, Sendable, Equatable {
     var branch: String?
 }
 
-/// Pinned and archived sessions and the group order, kept by newer servers
-/// so every client shows the same (GET / PUT /layout, and the "layout"
-/// event on the global stream). Each field is stamped with when a client
-/// last changed it (ms); 0 means never.
+/// Pinned and archived sessions, the group order and the server's projects,
+/// kept by newer servers so every client shows the same (GET / PUT /layout,
+/// and the "layout" event on the global stream). Each field is stamped with
+/// when a client last changed it (ms); 0 means never.
 struct SharedLayout: Codable, Equatable, Sendable {
     struct Stamps: Codable, Equatable, Sendable {
         var pinned: Double = 0
         var archived: Double = 0
         var groupOrder: Double = 0
+        var projects: Double?
     }
     var pinned: [String] = []
     var archived: [String] = []
     var groupOrder: [String] = []
+    /// Nil from servers that don't keep projects yet.
+    var projects: [SharedProject]?
     var at = Stamps()
+}
+
+/// A project as the server keeps it for every client: `Project` without the
+/// server (each client has its own id for it), dates as ms.
+struct SharedProject: Codable, Equatable, Sendable {
+    struct Env: Codable, Equatable, Sendable {
+        var key: String
+        var value: String
+    }
+    var id: String
+    var name = ""
+    var folder = ""
+    var branch: String?
+    var worktree = false
+    var env: [Env] = []
+    var model = ""
+    var effort = ""
+    var permissionMode = ""
+    var starred = false
+    var lastUsed: Double?
+
+    init(id: String) { self.id = id }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        id = try c.decode(String.self, forKey: .id)
+        name = try c.decodeIfPresent(String.self, forKey: .name) ?? ""
+        folder = try c.decodeIfPresent(String.self, forKey: .folder) ?? ""
+        branch = try c.decodeIfPresent(String.self, forKey: .branch)
+        worktree = try c.decodeIfPresent(Bool.self, forKey: .worktree) ?? false
+        env = try c.decodeIfPresent([Env].self, forKey: .env) ?? []
+        model = try c.decodeIfPresent(String.self, forKey: .model) ?? ""
+        effort = try c.decodeIfPresent(String.self, forKey: .effort) ?? ""
+        permissionMode = try c.decodeIfPresent(String.self, forKey: .permissionMode) ?? ""
+        starred = try c.decodeIfPresent(Bool.self, forKey: .starred) ?? false
+        lastUsed = try c.decodeIfPresent(Double.self, forKey: .lastUsed)
+    }
 }
 
 /// PUT /layout: the fields to set, each with when it changed here.
@@ -471,9 +511,10 @@ struct LayoutUpdate: Encodable {
     var pinned: [String]?
     var archived: [String]?
     var groupOrder: [String]?
+    var projects: [SharedProject]?
     var at: [String: Double] = [:]
 
-    var isEmpty: Bool { pinned == nil && archived == nil && groupOrder == nil }
+    var isEmpty: Bool { pinned == nil && archived == nil && groupOrder == nil && projects == nil }
 }
 
 struct SettingsUpdate: Encodable {

@@ -315,16 +315,13 @@ final class SessionOrganizer {
 
     /// The stamp for a change made now: later than `known` even when this
     /// device's clock is behind the one that set it, so the server takes it.
-    private static func stamp(after known: Double) -> Double { max(now, known + 1) }
+    static func stamp(after known: Double) -> Double { max(now, known + 1) }
 
     /// Follows the servers' layouts from now on, and catches up with those
     /// already received.
     func sync(with store: ServerStore) {
         self.store = store
-        store.onLayout = { [weak self] conn, l in self?.merge(conn.id, l) }
-        for c in store.orderedConnections {
-            if let l = c.layout { merge(c.id, l) }
-        }
+        store.observeLayouts { [weak self] conn, l in self?.merge(conn.id, l) }
     }
 
     /// Takes a server's layout: per field, whichever side changed it last

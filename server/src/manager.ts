@@ -57,6 +57,7 @@ export interface LayoutUpdate {
   pinned?: string[];
   archived?: string[];
   groupOrder?: string[];
+  projects?: unknown;
   at?: Partial<LayoutStamps>;
 }
 
@@ -658,7 +659,7 @@ export class Manager implements SessionHost, SessionToolHost {
 
   // ------------------------------------------------------------ layout
 
-  /** Pinned, archived and group order, as clients last set them. */
+  /** Pinned, archived, group order and projects, as clients last set them. */
   layout(): Layout {
     return this.store.layout();
   }
@@ -671,17 +672,26 @@ export class Manager implements SessionHost, SessionToolHost {
   updateLayout(req: LayoutUpdate): Layout {
     const l = this.store.layout();
     let changed = false;
+    const stamp = (f: keyof LayoutStamps) => {
+      const at = typeof req.at?.[f] === 'number' && Number.isFinite(req.at[f]) ? req.at[f] : Date.now();
+      if (at < l.at[f]) return false;
+      l.at[f] = at;
+      return (changed = true);
+    };
     for (const f of LAYOUT_FIELDS) {
       const v = req[f];
       if (v === undefined) continue;
       if (!Array.isArray(v) || v.length > 10_000 || v.some((x) => typeof x !== 'string' || x.length > 500)) {
         throw new HttpError(400, T('layoutInvalid', { field: f }));
       }
-      const at = typeof req.at?.[f] === 'number' && Number.isFinite(req.at[f]) ? req.at[f] : Date.now();
-      if (at < l.at[f]) continue;
-      l[f] = [...new Set(v)];
-      l.at[f] = at;
-      changed = true;
+      if (stamp(f)) l[f] = [...new Set(v)];
+    }
+    if (req.projects !== undefined) {
+      const v = req.projects;
+      const valid = Array.isArray(v) && v.length <= 1000 && JSON.stringify(v).length <= 1_000_000
+        && v.every((p) => p !== null && typeof p === 'object' && !Array.isArray(p) && typeof p.id === 'string' && p.id.length <= 100);
+      if (!valid) throw new HttpError(400, T('layoutInvalid', { field: 'projects' }));
+      if (stamp('projects')) l.projects = v as Record<string, unknown>[];
     }
     if (changed) {
       this.store.setLayout(l);
