@@ -31,6 +31,20 @@ test('gitInfo', async () => {
   assert.equal((await gitInfo(tmpdir())).isRepo, false);
 });
 
+test('gitInfo keeps the main branch when newer branches crowd it out', async () => {
+  const dir = repo();
+  const g = (...args: string[]) => execFileSync('git', ['-C', dir, ...args], { stdio: 'pipe' });
+  for (let i = 0; i < 12; i++) {
+    g('switch', '-q', '-c', `topic-${i}`, 'main');
+    execFileSync('git', ['-C', dir, 'commit', '-q', '--allow-empty', '-m', `t${i}`], {
+      env: { ...process.env, GIT_COMMITTER_DATE: `@${2_000_000_000 + i}` },
+    });
+  }
+  const info = await gitInfo(dir);
+  assert.equal(info.branches.length, 11);
+  assert.equal(info.branches.at(-1), 'main');
+});
+
 test('gitInfo lists a few recent branches, not session worktree ones', async () => {
   const dir = repo();
   const g = (...args: string[]) => execFileSync('git', ['-C', dir, ...args], { stdio: 'pipe' });

@@ -28,7 +28,8 @@ export interface GitInfo {
   /** Checked-out branch; absent when HEAD is detached. */
   current?: string;
   /**
-   * The few most recently committed local branches, for a short picker;
+   * The few most recently committed local branches, for a short picker,
+   * plus the main branch (origin's HEAD, else main or master) when older;
    * claude/* branches made for session worktrees are left out.
    */
   branches: string[];
@@ -44,15 +45,23 @@ export async function gitInfo(dir: string): Promise<GitInfo> {
   } catch {
     return { isRepo: false, branches: [] };
   }
-  const [current, branches, status, worktrees] = await Promise.all([
+  const [current, local, origin, status, worktrees] = await Promise.all([
     git(dir, ['symbolic-ref', '--quiet', '--short', 'HEAD']).then((s) => s.trim() || undefined, () => undefined),
-    git(dir, ['for-each-ref', '--sort=-committerdate', '--count=300', '--format=%(refname:short)', 'refs/heads']).then(
-      (s) => s.split('\n').filter((b) => b && !b.startsWith(WORKTREE_BRANCH_PREFIX)).slice(0, BRANCH_LIMIT),
+    git(dir, ['for-each-ref', '--sort=-committerdate', '--format=%(refname:short)', 'refs/heads']).then(
+      (s) => s.split('\n').filter((b) => b && !b.startsWith(WORKTREE_BRANCH_PREFIX)),
       () => [] as string[],
+    ),
+    git(dir, ['symbolic-ref', '--quiet', '--short', 'refs/remotes/origin/HEAD']).then(
+      (s) => s.trim().replace(/^origin\//, '') || undefined,
+      () => undefined,
     ),
     git(dir, ['status', '--porcelain', '--untracked-files=no'], 10_000).then((s) => s.trim() !== '', () => undefined),
     git(dir, ['worktree', 'list', '--porcelain']).then(parseWorktrees, () => undefined),
   ]);
+  // The main branch stays in the list however long ago it was committed to.
+  const main = [origin, 'main', 'master'].find((b) => b && local.includes(b));
+  const branches = local.slice(0, BRANCH_LIMIT);
+  if (main && !branches.includes(main)) branches.push(main);
   return {
     isRepo: true,
     root,
