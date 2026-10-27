@@ -20,6 +20,8 @@ function git(dir: string, args: string[], timeoutMs = 20_000): Promise<string> {
 
 const WORKTREE_BRANCH_PREFIX = 'claude/';
 const BRANCH_LIMIT = 10;
+/** Branches agents make for their own work, left out of the picker. */
+const AGENT_BRANCH = /^(claude|codex)/;
 
 export interface GitInfo {
   isRepo: boolean;
@@ -30,7 +32,7 @@ export interface GitInfo {
   /**
    * The few most recently committed local branches, for a short picker,
    * plus the main branch (origin's HEAD, else main or master) when older;
-   * claude/* branches made for session worktrees are left out.
+   * branches starting with claude or codex, made by agents, are left out.
    */
   branches: string[];
   /** Uncommitted changes to tracked files. */
@@ -48,7 +50,7 @@ export async function gitInfo(dir: string): Promise<GitInfo> {
   const [current, local, origin, status, worktrees] = await Promise.all([
     git(dir, ['symbolic-ref', '--quiet', '--short', 'HEAD']).then((s) => s.trim() || undefined, () => undefined),
     git(dir, ['for-each-ref', '--sort=-committerdate', '--format=%(refname:short)', 'refs/heads']).then(
-      (s) => s.split('\n').filter((b) => b && !b.startsWith(WORKTREE_BRANCH_PREFIX)),
+      (s) => s.split('\n').filter((b) => b && !AGENT_BRANCH.test(b)),
       () => [] as string[],
     ),
     git(dir, ['symbolic-ref', '--quiet', '--short', 'refs/remotes/origin/HEAD']).then(

@@ -45,14 +45,16 @@ test('gitInfo keeps the main branch when newer branches crowd it out', async () 
   assert.equal(info.branches.at(-1), 'main');
 });
 
-test('gitInfo lists a few recent branches, not session worktree ones', async () => {
+test('gitInfo lists a few recent branches, not agent ones', async () => {
   const dir = repo();
   const g = (...args: string[]) => execFileSync('git', ['-C', dir, ...args], { stdio: 'pipe' });
   for (let i = 0; i < 15; i++) g('branch', `topic-${i}`);
   g('branch', 'claude/some-session-abc123');
+  g('branch', 'codex/some-task');
+  g('branch', 'codex-fix');
   const info = await gitInfo(dir);
   assert.equal(info.branches.length, 10);
-  assert.ok(info.branches.every((b) => !b.startsWith('claude/')));
+  assert.ok(info.branches.every((b) => !/^(claude|codex)/.test(b)));
 });
 
 test('worktree on a base branch, keeping the subfolder', async () => {
