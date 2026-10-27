@@ -254,20 +254,31 @@ private struct ShiftReturnNewline: ViewModifier {
     }
 }
 
-/// Turns ⇧↩ into the field editor's "insert newline" (what ⌥↩ does). While an
-/// input method is composing, the key is left alone so ↩ confirms the candidate.
+/// Makes ⇧↩ insert a new line. The key goes on to the field as it is, and
+/// the "insert newline" command it turns into is taken before the field
+/// submits on it: the input method has to see the key itself, or after a line
+/// ending in Chinese it keeps that line as context and puts a space before
+/// what is typed next. While an input method is composing, ↩ confirms the
+/// candidate.
 final class NewlineKeys {
     var active = false
     private var monitor: Any?
+    private let proxy = FieldDelegateProxy()
 
     func install() {
         guard monitor == nil else { return }
         monitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
             guard let self, self.active, Self.isShiftReturn(event),
-                  let editor = event.window?.firstResponder as? NSTextView,
-                  !editor.hasMarkedText() else { return event }
-            editor.insertNewlineIgnoringFieldEditor(nil)
-            return nil
+                  let editor = event.window?.firstResponder as? NSTextView, !editor.hasMarkedText(),
+                  let field = editor.delegate, field !== self.proxy else { return event }
+            // Only while this key is handled: the field expects to be the
+            // editor's delegate.
+            self.proxy.inner = field
+            editor.delegate = self.proxy
+            DispatchQueue.main.async {
+                if editor.delegate === self.proxy { editor.delegate = field }
+            }
+            return event
         }
     }
 
@@ -282,6 +293,29 @@ final class NewlineKeys {
         // 36: Return, 76: keypad Enter.
         let mods = event.modifierFlags.intersection(.deviceIndependentFlagsMask).subtracting([.capsLock, .numericPad, .function])
         return (event.keyCode == 36 || event.keyCode == 76) && mods == .shift
+    }
+}
+
+/// Stands in for the text field as its field editor's delegate: "insert
+/// newline" from ⇧↩ inserts one, everything else goes to the field.
+private final class FieldDelegateProxy: NSObject, NSTextViewDelegate {
+    weak var inner: NSTextViewDelegate?
+
+    override func responds(to selector: Selector!) -> Bool {
+        super.responds(to: selector) || inner?.responds(to: selector) == true
+    }
+
+    override func forwardingTarget(for selector: Selector!) -> Any? { inner }
+
+    func textView(_ textView: NSTextView, doCommandBy selector: Selector) -> Bool {
+        if selector == #selector(NSResponder.insertNewline(_:)),
+           let event = NSApp.currentEvent, event.type == .keyDown, NewlineKeys.isShiftReturn(event) {
+            // Back to the field first, so it hears about the change.
+            textView.delegate = inner
+            textView.insertNewlineIgnoringFieldEditor(nil)
+            return true
+        }
+        return inner?.textView?(textView, doCommandBy: selector) ?? false
     }
 }
 #else
