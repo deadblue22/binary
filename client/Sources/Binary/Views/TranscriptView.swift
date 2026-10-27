@@ -16,7 +16,7 @@ struct TranscriptView<Source: TranscriptSource>: View {
     @State private var userScrolling = false
     /// Rows rendered, counted from the end. Opening a session at the bottom
     /// makes the list lay out every row above, so start with the latest few.
-    @State private var window = TranscriptWindow.initial
+    @State private var window: Int
     /// Bumped when row heights change everywhere (width, theme), so chunks
     /// drawn as placeholders measure their rows again.
     @State private var measureGeneration = 0
@@ -28,6 +28,13 @@ struct TranscriptView<Source: TranscriptSource>: View {
     @State private var highlighted: String?
     /// Earlier rows are being added: keep the distance to the end, not to the top.
     @State private var holdingEnd = false
+
+    init(source: Source, jump: TranscriptJump? = nil, onJumped: @escaping () -> Void = {}) {
+        self.source = source
+        self.jump = jump
+        self.onJumped = onJumped
+        _window = State(initialValue: TranscriptWindow.opening(source.items))
+    }
 
     private var rowGap: CGFloat { 16 * min(theme.scale, 1.2) }
 
@@ -41,7 +48,9 @@ struct TranscriptView<Source: TranscriptSource>: View {
         ForEach(TranscriptChunks.split(rows)) { chunk in
             TranscriptChunk(viewport: viewport, generation: measureGeneration) {
                 ForEach(chunk.range, id: \.self) { i in
+                    // Rows that didn't change aren't drawn again when the list is rebuilt.
                     TranscriptRow(item: rows[i], busy: busy, cwd: source.cwd)
+                        .equatable()
                         .background {
                             if highlighted == rows[i].id {
                                 RoundedRectangle(cornerRadius: 8, style: .continuous)
@@ -281,6 +290,36 @@ struct TranscriptView<Source: TranscriptSource>: View {
 enum TranscriptWindow {
     static let initial = 60
     static let step = 150
+
+    /// Rows rendered when a transcript opens: the latest ones until they fill
+    /// about two tall screens, at most `initial`. Heights are guessed low, so
+    /// the rows do fill the view (else earlier ones would load right away);
+    /// sessions with long messages then open with far fewer rows to build.
+    static func opening(_ items: [TranscriptItem]) -> Int {
+        var height: CGFloat = 0
+        for (n, item) in items.reversed().prefix(initial).enumerated() {
+            height += guessedHeight(item)
+            if height > 2600 { return n + 1 }
+        }
+        return initial
+    }
+
+    private static func guessedHeight(_ item: TranscriptItem) -> CGFloat {
+        // Lines of 110 characters, 20 pt each: low for the reading width.
+        func lines(_ s: Substring) -> CGFloat {
+            CGFloat(s.split(separator: "\n", omittingEmptySubsequences: false).reduce(0) { $0 + 1 + $1.count / 110 })
+        }
+        switch item.kind {
+        case .user(let text, let images):
+            // Long messages show their first 1600 characters until expanded.
+            return 36 + 20 * lines(text.prefix(1600)) + (images.isEmpty ? 0 : 60)
+        case .assistant(let text):
+            return 16 + 20 * lines(text[...])
+        default:
+            // A collapsed tool call or thinking block, a status line.
+            return 22
+        }
+    }
 }
 
 /// Collapsed tool calls and thinking are one quiet line each; runs of them sit
@@ -292,7 +331,7 @@ private func isQuiet(_ item: TranscriptItem) -> Bool {
     }
 }
 
-struct TranscriptRow: View {
+struct TranscriptRow: View, Equatable {
     let item: TranscriptItem
     let busy: Bool
     let cwd: String?

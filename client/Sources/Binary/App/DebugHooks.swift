@@ -37,6 +37,9 @@ import AppKit
 ///   BINARY_SCROLL_BENCH=<pages>    load that many older pages, show every row, then scroll
 ///                                  the transcript and print the time each step takes
 ///   BINARY_SCROLL_BENCH_RANGE=<pt> with BINARY_SCROLL_BENCH: scroll only that far from the end
+///   BINARY_SWITCH_BENCH=<n>        open the first n sessions of the sidebar in turn, twice, and
+///                                  print the main thread's time for each switch (with
+///                                  BINARY_TIMING, also each stall over 40 ms)
 ///   BINARY_LOG=1                   trace sidebar reveal and redirect steps on stderr
 ///   BINARY_SEARCH=<query>          type a query into the sidebar search
 ///   BINARY_OPEN_MATCH=1            with BINARY_SEARCH: open the first message that matched
@@ -121,6 +124,9 @@ enum DebugHooks {
                 if let s = nav.selection { nav.filePreview = FilePreviewRequest(server: s.server, session: s.session, path: path) }
             }
         }
+        if let n = Int(env["BINARY_SWITCH_BENCH"] ?? "") {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 4) { switchBench(nav: nav, count: n) }
+        }
         guard let out = env["BINARY_SNAPSHOT"] else { return }
         let delay = Double(env["BINARY_SNAPSHOT_DELAY"] ?? "") ?? 4
         DispatchQueue.main.asyncAfter(deadline: .now() + delay) {
@@ -190,6 +196,64 @@ enum DebugHooks {
                 work.append(cpu() - t0)
             }
         }
+    }
+
+    /// BINARY_SWITCH_BENCH: picks sessions one after another, 1.5 s apart,
+    /// and prints per switch the main thread's CPU time for the first frame
+    /// (selection, layout, display) and for the whole 1.5 s, and the longest
+    /// time the main thread didn't get to a 2 ms timer. The summary covers
+    /// the second pass, when the transcripts are in memory.
+    static func switchBench(nav: Navigation, count: Int) {
+        let refs = Array(nav.visibleOrder.prefix(count))
+        guard !refs.isEmpty, let w = NSApp.windows.first(where: { $0.isVisible && $0.contentView != nil }) else {
+            return err("switch: no sessions")
+        }
+        func cpu() -> Double { Double(clock_gettime_nsec_np(CLOCK_THREAD_CPUTIME_ID)) / 1e6 }
+        var last = CACurrentMediaTime()
+        var stall = 0.0
+        let beat = Timer(timeInterval: 0.002, repeats: true) { _ in
+            MainActor.assumeIsolated {
+                let now = CACurrentMediaTime()
+                if timing, now - last > 0.04, let t = openStarted {
+                    err(String(format: "  stall %.0f ms ending at +%.0f ms", (now - last) * 1000, Date().timeIntervalSince(t) * 1000))
+                }
+                stall = max(stall, now - last)
+                last = now
+            }
+        }
+        RunLoop.main.add(beat, forMode: .common)
+        var firsts: [Double] = [], totals: [Double] = [], stalls: [Double] = []
+        var step = 0
+        func next() {
+            let pass = step / refs.count
+            if pass == 2 {
+                beat.invalidate()
+                for (name, v) in [("first frame", firsts), ("1.5 s total", totals), ("longest stall", stalls)] {
+                    let s = v.sorted()
+                    err(String(format: "switch: %@ ms avg %.1f p50 %.1f max %.1f", name, s.reduce(0, +) / Double(s.count), s[s.count / 2], s.last ?? 0))
+                }
+                if env["BINARY_SNAPSHOT_QUIT"] == "1" { exit(0) }
+                return
+            }
+            let ref = refs[step % refs.count]
+            step += 1
+            let t0 = cpu()
+            // As a click on its sidebar row.
+            nav.pick(ref)
+            w.layoutIfNeeded()
+            w.displayIfNeeded()
+            CATransaction.flush()
+            let first = cpu() - t0
+            last = CACurrentMediaTime()
+            stall = 0
+            DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) {
+                let total = cpu() - t0, longest = max(stall, CACurrentMediaTime() - last) * 1000
+                err(String(format: "switch: pass %d %@ first %.1f ms, total %.1f ms, stall %.1f ms", pass + 1, String(ref.session.prefix(8)), first, total, longest))
+                if pass == 1 { firsts.append(first); totals.append(total); stalls.append(longest) }
+                next()
+            }
+        }
+        next()
     }
 
     /// One BINARY_KEYS step. Keys go through the event queue (and so through

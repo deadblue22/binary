@@ -2,12 +2,9 @@ import AppKit
 import SwiftUI
 
 struct ContentView: View {
-    @Environment(ServerStore.self) private var store
     @Environment(Navigation.self) private var nav
     @Environment(\.theme) private var theme
     @Environment(\.openSettings) private var openSettings
-    @State private var controller: SessionController?
-    @State private var agent: SubagentController?
     @AppStorage("sidebarWidth") private var sidebarWidth = 320.0
     @AppStorage("showSidebar") private var showSidebar = true
 
@@ -22,7 +19,9 @@ struct ContentView: View {
                     .background(theme.c.sidebar)
                 ColumnDivider(width: $sidebarWidth, range: 240...520, side: .leading)
             }
-            NavigationStack { detail }
+            // Its own view: the open session changing doesn't run this body,
+            // which would rebuild the whole sidebar on every switch.
+            NavigationStack { DetailColumn() }
                 .frame(minWidth: 420)
         }
         .toolbar {
@@ -39,16 +38,41 @@ struct ContentView: View {
         .background(Button("") { nav.searchRequest += 1 }.keyboardShortcut("f").opacity(0).frame(width: 0, height: 0))
         .toolbarBackground(theme.c.background, for: .windowToolbar)
         .sheet(item: $nav.filePreview) { FilePreviewView(request: $0) }
-        .onChange(of: nav.selection) { _, ref in
-            if ref != nil { nav.draft = nil }
-            select(ref)
-        }
-        .onChange(of: theme.lang) { _, _ in reconnectForLanguage() }
         .task {
             guard DebugHooks.openSettings else { return }
             try? await Task.sleep(nanoseconds: 1_200_000_000)
             openSettings()
         }
+    }
+}
+
+/// The detail column: the open session, a subagent, or a new session.
+struct DetailColumn: View {
+    @Environment(ServerStore.self) private var store
+    @Environment(Navigation.self) private var nav
+    @Environment(AppearanceStore.self) private var appearance
+    @Environment(\.theme) private var theme
+    @State private var controller: SessionController?
+    @State private var agent: SubagentController?
+
+    var body: some View {
+        detail
+            // Here rather than in the session's view, which is built anew for
+            // each session: the panel stays and only its contents change.
+            .sessionInspector(isPresented: Binding(get: { appearance.showInspector && nav.draft == nil && (agent != nil || controller != nil) },
+                                                   set: { appearance.showInspector = $0 }),
+                              width: InspectorLayout.width(theme)) {
+                if let agent {
+                    SessionInspector(conn: agent.conn, sessionID: agent.sessionID, currentAgent: agent.agentID)
+                } else if let controller {
+                    OpenSessionInspector(controller: controller)
+                }
+            }
+            .onChange(of: nav.selection, initial: true) { _, ref in
+                if ref != nil, nav.draft != nil { nav.draft = nil }
+                select(ref)
+            }
+            .onChange(of: theme.lang) { _, _ in reconnectForLanguage() }
     }
 
     @ViewBuilder
@@ -108,6 +132,19 @@ struct ContentView: View {
         let c = SessionController(conn: conn, id: ref.session)
         c.start()
         controller = c
+    }
+}
+
+/// The info panel of the open session; reads its connection state here so
+/// the detail column doesn't redraw when it changes.
+private struct OpenSessionInspector: View {
+    let controller: SessionController
+    @Environment(Navigation.self) private var nav
+
+    var body: some View {
+        SessionInspector(conn: controller.conn, sessionID: controller.id, connected: controller.connected) {
+            nav.renameRequest += 1
+        }
     }
 }
 

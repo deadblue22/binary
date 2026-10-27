@@ -47,10 +47,7 @@ final class LocalCache {
     // MARK: Transcripts
 
     func transcript(server: UUID, session: String) async -> CachedTranscript? {
-        if let t = memory[server]?[session] {
-            remember(server, session, t)
-            return t
-        }
+        if let t = memoryTranscript(server: server, session: session) { return t }
         let url = transcriptURL(server, session)
         let t = await Task.detached { () -> CachedTranscript? in
             guard let data = try? Data(contentsOf: url) else { return nil }
@@ -58,6 +55,13 @@ final class LocalCache {
             return try? WireDate.decoder.decode(CachedTranscript.self, from: data)
         }.value
         if let t { remember(server, session, t) }
+        return t
+    }
+
+    /// The copy kept in memory, without waiting for the disk.
+    func memoryTranscript(server: UUID, session: String) -> CachedTranscript? {
+        guard let t = memory[server]?[session] else { return nil }
+        remember(server, session, t)
         return t
     }
 

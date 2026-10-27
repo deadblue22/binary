@@ -224,7 +224,10 @@ struct FlowText: NSViewRepresentable {
         if tv.textStorage?.isEqual(to: text) == false {
             tv.textStorage?.setAttributedString(text)
         }
-        tv.linkTextAttributes = [.foregroundColor: linkColor, .cursor: NSCursor.pointingHand]
+        // Setting these lays the text out again, even when they are the same.
+        if tv.linkTextAttributes?[.foregroundColor] as? NSColor != linkColor {
+            tv.linkTextAttributes = [.foregroundColor: linkColor, .cursor: NSCursor.pointingHand]
+        }
     }
 
     func sizeThatFits(_ proposal: ProposedViewSize, nsView tv: FlowTextView, context: Context) -> CGSize? {

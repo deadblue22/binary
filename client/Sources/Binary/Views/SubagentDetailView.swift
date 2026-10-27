@@ -5,11 +5,9 @@ import SwiftUI
 struct SubagentDetailView: View {
     let controller: SubagentController
     @Environment(Navigation.self) private var nav
-    @Environment(AppearanceStore.self) private var appearance
     @Environment(\.theme) private var theme
 
     var body: some View {
-        @Bindable var appearance = appearance
         VStack(spacing: 0) {
             if controller.loaded {
                 TranscriptView(source: controller)
@@ -45,9 +43,6 @@ struct SubagentDetailView: View {
                 .keyboardShortcut("r")
                 InspectorToggle()
             }
-        }
-        .sessionInspector(isPresented: $appearance.showInspector, width: InspectorLayout.width(theme)) {
-            SessionInspector(conn: controller.conn, sessionID: controller.sessionID, currentAgent: controller.agentID)
         }
     }
 

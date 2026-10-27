@@ -72,6 +72,11 @@ final class SessionController {
 
     func start() {
         guard task == nil, let api = conn.api else { return }
+        // A copy still in memory goes into the first frame: no Loading… in
+        // between, and the transcript isn't built twice.
+        if entries.isEmpty, let t = LocalCache.shared.memoryTranscript(server: conn.id, session: id) {
+            show(saved: t)
+        }
         task = Task { [weak self] in
             await self?.showSaved()
             var delay: UInt64 = 1
@@ -124,6 +129,10 @@ final class SessionController {
     private func showSaved() async {
         guard entries.isEmpty, let t = await LocalCache.shared.transcript(server: conn.id, session: id) else { return }
         guard entries.isEmpty, !Task.isCancelled else { return }
+        show(saved: t)
+    }
+
+    private func show(saved t: CachedTranscript) {
         DebugHooks.mark("cache \(t.entries.count) entries")
         entries = t.entries
         hasMore = t.hasMore
@@ -179,6 +188,7 @@ final class SessionController {
             DebugHooks.mark("delta received \(data.count) bytes")
             let decoded = await Task.detached { try? WireDate.decoder.decode(DeltaEvent.self, from: data) }.value
             guard let ev = decoded else { return }
+            let before = entries
             if let i = entries.lastIndex(where: { $0.uuid == ev.anchor }) {
                 entries = Array(entries[...i]) + ev.entries
                 // Seqs of the kept entries still hold if the log is the same generation.
@@ -194,7 +204,8 @@ final class SessionController {
             permissions = ev.permissions
             setSummary(ev.session)
             DebugHooks.mark("delta \(ev.entries.count) entries after anchor")
-            rebuild()
+            // Usually the saved copy was already up to date.
+            if entries != before { rebuild() }
             loaded = true
             refreshing = false
             save()

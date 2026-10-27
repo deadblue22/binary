@@ -5,7 +5,6 @@ struct SessionDetailView: View {
     @Bindable var controller: SessionController
     @Environment(\.theme) private var theme
     @Environment(Navigation.self) private var nav
-    @Environment(AppearanceStore.self) private var appearance
     @State private var renaming = false
     @State private var newTitle = ""
     @State private var attachments: [PendingImage] = []
@@ -14,7 +13,6 @@ struct SessionDetailView: View {
     private var summary: SessionSummary? { controller.summary }
 
     var body: some View {
-        @Bindable var appearance = appearance
         VStack(spacing: 0) {
             if controller.loaded {
                 TranscriptView(source: controller, jump: nav.jump?.ref == controller.ref ? nav.jump : nil,
@@ -108,11 +106,9 @@ struct SessionDetailView: View {
                 InspectorToggle()
             }
         }
-        .sessionInspector(isPresented: $appearance.showInspector, width: InspectorLayout.width(theme)) {
-            SessionInspector(conn: controller.conn, sessionID: controller.id, connected: controller.connected) {
-                newTitle = summary?.title ?? ""
-                renaming = true
-            }
+        .onChange(of: nav.renameRequest) { _, _ in
+            newTitle = summary?.title ?? ""
+            renaming = true
         }
         .alert(tr("Rename Session"), isPresented: $renaming) {
             TextField(tr("Title"), text: $newTitle)

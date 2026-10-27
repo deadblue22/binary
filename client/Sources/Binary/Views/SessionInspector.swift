@@ -19,6 +19,8 @@ struct SessionInspector: View {
     @State private var notice: String?
     @State private var newGroup = false
     @State private var groupName = ""
+    /// The whole subagent list is open (else only the latest few).
+    @State private var showAllAgents = false
 
     private var s: SessionSummary? { conn.sessions[sessionID] }
     private var ref: SessionRef { SessionRef(server: conn.id, session: sessionID) }
@@ -45,8 +47,13 @@ struct SessionInspector: View {
         .fillAvailable()
         // Same ground as the conversation; the cards' own fill sets them apart.
         .background(theme.c.background)
-        .task(id: s?.subagentCount ?? 0) {
+        .task(id: "\(sessionID)|\(s?.subagentCount ?? 0)") {
             if (s?.subagentCount ?? 0) > 0 { await conn.loadSubagents(sessionID) }
+        }
+        // The panel stays while sessions are switched (DetailColumn).
+        .onChange(of: sessionID) { _, _ in
+            notice = nil
+            showAllAgents = false
         }
         .alert(tr("New Group"), isPresented: $newGroup) {
             TextField(tr("Group name"), text: $groupName)
@@ -250,6 +257,10 @@ struct SessionInspector: View {
     private func tasksCard(_ s: SessionSummary) -> some View {
         let children = conn.children(of: s.id).sorted(by: SidebarBuilder.sorter(.updated))
         let agents = conn.subagents[s.id] ?? []
+        // Only the latest few, as in the sidebar (a row for every subagent
+        // made opening a session with many of them slow), and the one viewed.
+        let olderOpen = currentAgent.map { id in !agents.prefix(SidebarBuilder.agentPreview).contains { $0.id == id } } ?? false
+        let shown = SidebarBuilder.shownAgents(agents, showAll: showAllAgents || olderOpen)
         let count = children.count + max(agents.count, s.subagentCount ?? 0)
         if count > 0 {
             InspectorCard(title: tr("Subtasks"), trailing: "\(count)") {
@@ -259,7 +270,7 @@ struct SessionInspector: View {
                         nav.selection = SessionRef(server: conn.id, session: c.id)
                     }
                 }
-                ForEach(agents) { a in
+                ForEach(shown) { a in
                     // A running one shows the pulsing dot in place of its icon.
                     TaskRow(icon: a.running == true ? nil : "person.2.fill", state: .running, live: true,
                             title: a.title.flatMap { $0.isEmpty ? nil : $0 } ?? "Subagent",
@@ -268,6 +279,20 @@ struct SessionInspector: View {
                             selected: currentAgent == a.id) {
                         nav.selection = SessionRef(server: conn.id, session: s.id, agent: a.id)
                     }
+                }
+                if agents.count > SidebarBuilder.agentPreview + 1 {
+                    Button {
+                        showAllAgents = shown.count < agents.count
+                    } label: {
+                        Text(shown.count < agents.count ? tr("Show all \(agents.count) subagents")
+                             : tr("Show only the latest \(SidebarBuilder.agentPreview)"))
+                            .font(theme.font(.caption).weight(.medium))
+                            .foregroundStyle(theme.c.textMuted)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                    .padding(.vertical, 2)
                 }
                 if agents.isEmpty && (s.subagentCount ?? 0) > 0 {
                     Text(conn.supportsSubagents ? tr("Loading subagents…") : tr("This server can't list subagents"))

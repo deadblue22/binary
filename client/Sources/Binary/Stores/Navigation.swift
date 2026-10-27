@@ -43,6 +43,8 @@ final class Navigation {
     @ObservationIgnored var visibleOrder: [SessionRef] = []
     /// Bumped to focus the sidebar search field.
     var searchRequest = 0
+    /// Bumped for the open session to ask for a new title (the info panel's Rename).
+    var renameRequest = 0
     /// A transcript row to scroll to, picked from a search match; the
     /// session's transcript takes it once it shows that session.
     var jump: TranscriptJump?
@@ -57,6 +59,15 @@ final class Navigation {
     @ObservationIgnored var scrollHandler: ((SessionRef) -> Void)?
 
     func scroll(to ref: SessionRef) { scrollHandler?(ref) }
+    /// A selection made on a sidebar row (a click, an arrow key): the row is
+    /// in view already, so the sidebar doesn't look for it and scroll to it.
+    @ObservationIgnored var pickedInSidebar: SessionRef?
+
+    /// Selects a row the sidebar shows.
+    func pick(_ ref: SessionRef) {
+        if ref != selection { pickedInSidebar = ref }
+        selection = ref
+    }
 
     /// ⌘[ / ⌘]: bumped for the open session's composer to act on (nothing
     /// happens while no message box is shown).
@@ -75,7 +86,7 @@ final class Navigation {
         guard !visibleOrder.isEmpty else { return }
         let i = selection.flatMap { visibleOrder.firstIndex(of: $0) } ?? (d > 0 ? -1 : visibleOrder.count)
         let next = visibleOrder[max(0, min(visibleOrder.count - 1, i + d))]
-        selection = next
+        pick(next)
         scroll(to: next)
     }
 }

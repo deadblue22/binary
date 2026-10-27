@@ -87,7 +87,8 @@ struct SidebarView: View {
         .background(SelectionWatcher { s in
             if let s, redirectIfMirror(s) { return }
             if let s, !batch.contains(s) { batch = [] }
-            if let s { reveal(s) }
+            if let s, s != nav.pickedInSidebar { reveal(s) }
+            nav.pickedInSidebar = nil
         })
         // A copy can become hidden after it was picked (its server came online later).
         .onChange(of: mirrors.target.values.reduce(0) { $0 + $1.count }) { _, _ in
@@ -657,7 +658,7 @@ struct SidebarView: View {
         }
         batch = []
         anchor = ref
-        nav.selection = ref
+        nav.pick(ref)
     }
 
     /// The rows an action on `ref` applies to: the batch when `ref` is in it.
