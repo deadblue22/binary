@@ -246,17 +246,35 @@ struct AttachmentStrip: View {
 }
 
 #if os(macOS)
-/// Catches ⌘V while `active` and takes images off the pasteboard; any other
-/// paste goes to the text field as usual.
+/// Catches ⌘V in the message box and takes images off the pasteboard; any
+/// other paste goes to the text field as usual. Setting `active` when the box
+/// gains focus remembers which field it is, and ⌘V is caught only while that
+/// field has the keyboard: a focus flag alone can go stale, or outlive its
+/// view, and then swallow every paste in the window.
 final class PasteCatcher {
-    var active = false
+    var active = false {
+        // Focus lands a moment after the flag is set.
+        didSet { if active { DispatchQueue.main.async { [weak self] in self?.remember() } } }
+    }
     var onImages: (([PendingImage]) -> Void)?
     private var monitor: Any?
+    private weak var field: AnyObject?
+
+    private func remember() {
+        // The window need not be key yet (the app may be in the background).
+        if let f = NSApp.windows.lazy.compactMap(Self.focusedField(in:)).first { field = f }
+    }
+
+    /// The text field being edited: the field editor's delegate.
+    private static func focusedField(in window: NSWindow?) -> AnyObject? {
+        (window?.firstResponder as? NSTextView)?.delegate
+    }
 
     func install() {
         guard monitor == nil else { return }
         monitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
-            guard let self, self.active,
+                guard let self, let now = Self.focusedField(in: event.window),
+                  now === (self.field ?? (self.active ? now : nil)),
                   event.modifierFlags.intersection(.deviceIndependentFlagsMask)
                       .subtracting([.capsLock, .numericPad, .function]) == .command,
                   event.charactersIgnoringModifiers?.lowercased() == "v" else { return event }
