@@ -717,6 +717,11 @@ struct SidebarView: View {
             if conn.isLocal {
                 Button(tr("Show in Finder")) { NSWorkspace.shared.selectFile(nil, inFileViewerRootedAtPath: s.cwd) }
             }
+            if s.external?.working == true {
+                Button(tr("Take Over and Interrupt")) {
+                    Task { try? await conn.takeover(s.id) }
+                }
+            }
             if s.live {
                 Divider()
                 Button(tr("Stop Process")) {

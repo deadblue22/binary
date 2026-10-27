@@ -3,9 +3,10 @@
 // Session objects and fans out list changes.
 
 import { randomUUID } from 'node:crypto';
-import { existsSync, readdirSync, readFileSync, realpathSync, statSync } from 'node:fs';
+import { closeSync, existsSync, openSync, readdirSync, readFileSync, readSync, realpathSync, statSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { basename, isAbsolute, join, resolve } from 'node:path';
+import { StringDecoder } from 'node:string_decoder';
 import {
   forkSession,
   query,
@@ -36,9 +37,9 @@ import { SessionSearch, type SearchResult } from './search.js';
 import { SESSION_TOOL_SERVER, SESSION_TOOLS, sessionTools, type SessionToolHost } from './tools.js';
 import { DEFAULT_LANG, encode, LocalizedError, T, type Lang, type Msg, type Text } from './i18n.js';
 import { event, Subscriber, type Event, type Sink } from './log.js';
-import { preview, toEntries, type Entry, type RawMessage } from './normalize.js';
+import { preview, titleFromPrompt, toEntries, type Entry, type RawMessage } from './normalize.js';
 import { isUnder, mainCheckout, tempRoots } from './recent.js';
-import { checkImages, readPlanUsage, Session, type ImageInput, type BackgroundTask, type PlanUsage, type SessionHost, type SettingsUpdate } from './session.js';
+import { checkImages, NotLiveError, readPlanUsage, Session, type ImageInput, type BackgroundTask, type PlanUsage, type SessionHost, type SettingsUpdate } from './session.js';
 import { LAYOUT_FIELDS, type Layout, type LayoutStamps, type Store } from './store.js';
 
 export const EFFORT_LEVELS = ['low', 'medium', 'high', 'xhigh', 'max'];
@@ -51,6 +52,11 @@ const FALLBACK_MODELS = [
   { value: 'sonnet', displayName: 'Sonnet', description: '' },
   { value: 'haiku', displayName: 'Haiku', description: '' },
 ];
+
+/** Who a takeover took a session from. */
+export interface TakeoverResult {
+  former?: { holder: Holder; pid: number; interrupted: boolean };
+}
 
 /** PUT /layout: any of the fields, each with the time it was changed. */
 export interface LayoutUpdate {
@@ -228,6 +234,69 @@ function findTranscript(id: string, cwd: string): string {
   return '';
 }
 
+/** How much of a transcript to read while looking for its first prompt. */
+const PROMPT_CHUNK = 64 * 1024;
+const PROMPT_SCAN_MAX = 4 * 1024 * 1024;
+
+/** The text of a user message that is a real prompt (not meta or a tool result). */
+function promptText(m: RawMessage): string {
+  if (m.type !== 'user' || m.isMeta || m.isCompactSummary || m.isSidechain) return '';
+  const content = m.message?.content;
+  if (typeof content === 'string') return content.trim() ? content : '';
+  if (!Array.isArray(content)) return '';
+  const parts: string[] = [];
+  for (const b of content as { type?: string; text?: string }[]) {
+    if (b?.type === 'tool_result') return '';
+    if (b?.type === 'text' && typeof b.text === 'string') parts.push(b.text);
+  }
+  const text = parts.join('');
+  return text.trim() ? text : '';
+}
+
+/**
+ * The first prompt in a transcript, as written. The SDK's `firstPrompt` has
+ * its newlines replaced with spaces and is cut at 200 characters, so a
+ * "Title:" line can no longer be told apart from the body: read the file.
+ */
+function firstPromptOf(id: string, cwd: string): string {
+  const file = findTranscript(id, cwd);
+  if (!file) return '';
+  let fd: number | undefined;
+  try {
+    fd = openSync(file, 'r');
+    const decoder = new StringDecoder('utf8');
+    let rest = '';
+    for (let read = 0; read < PROMPT_SCAN_MAX; ) {
+      const buf = Buffer.alloc(PROMPT_CHUNK);
+      const n = readSync(fd, buf, 0, buf.length, read);
+      if (!n) {
+        rest += decoder.end();
+        break;
+      }
+      read += n;
+      rest += decoder.write(buf.subarray(0, n));
+      const lines = rest.split('\n');
+      rest = lines.pop() ?? '';
+      for (const line of lines) {
+        if (!line.trim()) continue;
+        let msg: RawMessage;
+        try {
+          msg = JSON.parse(line) as RawMessage;
+        } catch {
+          continue;
+        }
+        const text = promptText(msg);
+        if (text) return text;
+      }
+    }
+  } catch {
+    return '';
+  } finally {
+    if (fd !== undefined) closeSync(fd);
+  }
+  return '';
+}
+
 /** What Claude Code notes about a subagent in its `agent-<id>.meta.json`. */
 interface SubagentMeta {
   /** The name it was launched with (the Agent tool's `description`). */
@@ -313,6 +382,8 @@ export class Manager implements SessionHost, SessionToolHost {
   private subagentCounts = new Map<string, number>();
   private pendingTitles = new Map<string, string>();
   private pendingTags = new Map<string, string>();
+  /** Sessions a client took over from the program running them (see takeover). */
+  private takenOver = new Set<string>();
   private global = new Set<Subscriber>();
   private dirty = new Set<string>();
   private timers: NodeJS.Timeout[] = [];
@@ -439,6 +510,7 @@ export class Manager implements SessionHost, SessionToolHost {
         const s = this.sessions.get(info.sessionId);
         if (s && !s.cwd && info.cwd) s.cwd = info.cwd;
         this.noteMessageTime(info);
+        this.captureTitle(info);
         await this.applyStoredTag(info);
       }
       for (const id of removed) this.markDirty(id);
@@ -457,6 +529,34 @@ export class Manager implements SessionHost, SessionToolHost {
     if (this.messageAt.get(info.sessionId)?.stamp === stamp) return;
     const file = findTranscript(info.sessionId, info.cwd ?? '');
     this.messageAt.set(info.sessionId, { stamp, at: file ? lastMessageAt(file) : 0 });
+  }
+
+  /**
+   * Keeps the title once: a parsed one from the first prompt, or a rename made
+   * in another program. Without this every list re-derived the title from
+   * info.summary, so an updated summary renamed the session under the user.
+   */
+  private captureTitle(info: SDKSessionInfo): void {
+    const id = info.sessionId;
+    const stored = this.store.get(id)?.title?.trim();
+    const custom = info.customTitle?.trim();
+    if (custom) {
+      // A rename in the desktop app is the newest name: mirror it, or the
+      // title stored from the first prompt would hide it forever.
+      if (!this.pendingTitles.has(id) && custom !== stored) {
+        this.store.update(id, (r) => (r.title = custom));
+        this.markDirty(id);
+      }
+      return;
+    }
+    if (stored || this.pendingTitles.has(id) || !info.firstPrompt) return;
+    // The transcript first: firstPrompt has its newlines flattened already.
+    const title = titleFromPrompt(firstPromptOf(id, info.cwd ?? '') || info.firstPrompt);
+    if (!title) return;
+    this.store.update(id, (r) => {
+      if (!r.title?.trim()) r.title = title;
+    });
+    this.markDirty(id);
   }
 
   /** A tag chosen before the transcript existed is written once it does. */
@@ -522,6 +622,8 @@ export class Manager implements SessionHost, SessionToolHost {
       }
       this.agents = next;
       this.agentsOk = true;
+      // A taken-over holder keeps no say once its turn is over.
+      for (const id of [...this.takenOver]) if (next.get(id)?.status !== 'busy') this.takenOver.delete(id);
       for (const id of this.turns.keys()) if (next.get(id)?.status !== 'busy') this.turns.delete(id);
       for (const a of list) if (a.status === 'busy') void this.checkTurn(a.sessionId);
       void this.drainQueues();
@@ -590,10 +692,64 @@ export class Manager implements SessionHost, SessionToolHost {
 
   /** Whether another program is in the middle of a turn on this session. */
   busyElsewhere(id: string): boolean {
+    if (this.takenOver.has(id)) return false;
     const agent = this.agents.get(id);
     const s = this.sessions.get(id);
     const ours = s && (s.live || Date.now() - s.lastExit < 10_000);
     return !!agent && !ours && agent.status === 'busy' && !this.turnEnded(id);
+  }
+
+  /**
+   * Takes a session from the program holding it: marks that holder as taken
+   * over, ends the turn it runs (SIGINT, as Ctrl-C there would) and makes this
+   * server the holder, so later sends start our own process instead of
+   * queueing and an interrupt is no longer rejected.
+   */
+  takeover(id: string): TakeoverResult {
+    const s = this.session(id);
+    if (!s) throw new HttpError(404, T('sessionNotFound'));
+    const agent = this.agents.get(id);
+    const ours = s.live || Date.now() - s.lastExit < 10_000;
+    if (!agent || ours) return {};
+    const why = this.cannotRun(id);
+    if (why) throw new HttpError(409, why);
+    const running = agent.status === 'busy' && !this.turnEnded(id);
+    // Mark before signalling: a message sent while the other turn winds down
+    // must start ours rather than queue behind it again.
+    this.takenOver.add(id);
+    this.turns.delete(id);
+    const interrupted = running ? this.endExternalTurn(id, agent) : false;
+    const holder = this.holders.get(agent.pid) ?? 'other';
+    this.log(`session ${id}: taken over from ${holder} (pid ${agent.pid})${interrupted ? ', turn interrupted' : ''}`);
+    this.markDirty(id);
+    void this.drainQueues();
+    return { former: { holder, pid: agent.pid, interrupted } };
+  }
+
+  /** Stops the current turn: ours, or the one a taken-over program still runs. */
+  async interrupt(id: string): Promise<void> {
+    const s = this.session(id);
+    if (!s) throw new HttpError(404, T('sessionNotFound'));
+    if (s.live) {
+      await s.interrupt();
+      return;
+    }
+    if (!this.takenOver.has(id)) throw new NotLiveError();
+    // The takeover already ended that turn; signal again in case it ignored it.
+    const agent = this.agents.get(id);
+    if (agent && agent.status === 'busy' && !this.turnEnded(id)) this.endExternalTurn(id, agent);
+  }
+
+  /** Ends the turn another program runs: SIGINT is what Ctrl-C does there. */
+  private endExternalTurn(id: string, agent: ActiveAgent): boolean {
+    if (agent.pid <= 1) return false; // never signal init or a bogus pid
+    try {
+      process.kill(agent.pid, 'SIGINT');
+      return true;
+    } catch (err) {
+      this.log(`session ${id}: interrupting pid ${agent.pid} failed: ${(err as Error).message}`);
+      return false;
+    }
   }
 
   /**
@@ -990,11 +1146,15 @@ export class Manager implements SessionHost, SessionToolHost {
     const created = info?.createdAt ?? (rec?.createdAt ? Date.parse(rec.createdAt) : 0);
     const lastMsg = this.messageAt.get(id)?.at;
     let updated = Math.max(lastMsg || info?.lastModified || 0, created || 0, s?.listedActive ?? 0);
+    // Once kept in the store the title is fixed; a changing info.summary (an
+    // updated Claude Code summary, or a turn taken in another client) can't
+    // rename the session. Until the list gets a chance to parse it, the
+    // prompt's own first line is the best answer.
     const title =
       rec?.title?.trim() ||
       this.pendingTitles.get(id) ||
+      (info?.firstPrompt ? titleFromPrompt(info.firstPrompt) : '') ||
       info?.summary?.trim() ||
-      (info?.firstPrompt ? preview(info.firstPrompt, 80) : '') ||
       T('newSession');
     const tag = this.pendingTags.get(id) ?? rec?.tag ?? info?.tag;
 
@@ -1055,7 +1215,7 @@ export class Manager implements SessionHost, SessionToolHost {
     const ours = s && (s.live || Date.now() - s.lastExit < 10_000);
     if (agent && !ours && (sum.state === 'idle' || sum.state === 'error')) {
       const background = agent.status === 'busy' && this.turnEnded(id);
-      const busy = agent.status === 'busy' && !background;
+      const busy = agent.status === 'busy' && !background && !this.takenOver.has(id);
       const holder = this.holders.get(agent.pid) ?? 'other';
       sum.state = 'external';
       sum.external = { busy, ...(background && { background }), holder };

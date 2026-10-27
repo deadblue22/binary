@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { encode, type Msg } from '../src/i18n.js';
-import { shrinkInput, toEntry, toolLabel, truncate, type RawMessage } from '../src/normalize.js';
+import { clipTitle, shrinkInput, titleFromPrompt, toEntry, toolLabel, truncate, type RawMessage } from '../src/normalize.js';
 
 const render = (m: Msg | undefined): string => (typeof m === 'string' ? m : (m?.render('en') ?? ''));
 
@@ -227,4 +227,29 @@ test('synthetic notes from the live stream are hidden, tool results are not', ()
   assert.ok(toEntry(result));
   const interrupted: RawMessage = { type: 'user', isSynthetic: true, message: { role: 'user', content: '[Request interrupted by user]' } };
   assert.equal(toEntry(interrupted)?.kind, 'system');
+});
+
+test('session titles come from the first line, never from the body', () => {
+  assert.equal(titleFromPrompt('Title: Fix the flaky login test\n\nThe test fails on CI only.'), 'Fix the flaky login test');
+  assert.equal(titleFromPrompt('Rewrite the search indexer\nsecond line'), 'Rewrite the search indexer');
+  assert.equal(titleFromPrompt('Title：修复登录测试\n正文'), '修复登录测试');
+  assert.equal(titleFromPrompt('\n\nTitle: After blank lines\nbody'), 'After blank lines');
+  assert.equal(titleFromPrompt(''), '');
+});
+
+test('a long title is cut at a word boundary with an ellipsis', () => {
+  const words = Array.from({ length: 40 }, (_, i) => `word${i + 1}`);
+  const title = titleFromPrompt(`Title: ${words.join(' ')}`);
+  assert.ok(title.length <= 80, title);
+  assert.ok(title.endsWith('…'), title);
+  const kept = title.slice(0, -1).split(' ');
+  assert.deepEqual(kept, words.slice(0, kept.length), 'no partial word');
+  assert.ok(!title.includes('  '), title);
+
+  // Nothing to break at: still bounded.
+  const squashed = titleFromPrompt('x'.repeat(200));
+  assert.equal([...squashed].length, 80);
+  assert.ok(squashed.endsWith('…'));
+
+  assert.equal(clipTitle('short', 80), 'short');
 });

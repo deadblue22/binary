@@ -48,6 +48,7 @@ export interface RawMessage {
   timestamp?: string;
   parent_tool_use_id?: string | null;
   isMeta?: boolean;
+  isSidechain?: boolean;
   /** Live stream: user-role content the CLI added itself (the live form of isMeta). */
   isSynthetic?: boolean;
   isCompactSummary?: boolean;
@@ -87,6 +88,39 @@ export function preview(s: string, n: number): string {
   const flat = s.split(/\s+/).filter(Boolean).join(' ');
   const chars = [...flat];
   return chars.length > n ? chars.slice(0, n).join('') + '…' : flat;
+}
+
+/** Longest title the session list shows, in characters. */
+export const TITLE_MAX = 80;
+
+/**
+ * Cuts s to at most max characters, at the end of a word when there is one,
+ * with an ellipsis: a title must not end in half a word.
+ */
+export function clipTitle(s: string, max = TITLE_MAX): string {
+  const chars = [...s];
+  if (chars.length <= max) return s;
+  const room = max - 1; // the ellipsis takes the last character
+  let cut = chars.slice(0, room).join('');
+  const boundary = /[\s\u3000]\S*$/.exec(cut);
+  if (boundary && boundary.index > 0) cut = cut.slice(0, boundary.index);
+  cut = cut.replace(/[\s,;:.!?，；：。！？、-]+$/, '');
+  if (!cut) cut = chars.slice(0, room).join('');
+  return `${cut}…`;
+}
+
+/**
+ * A session title from its first prompt: the text after a leading "Title:",
+ * else the prompt's first line. Lines are never joined: the body must not be
+ * glued onto the title (the SDK's firstPrompt, flattened, cannot be split, so
+ * callers pass the prompt as written).
+ */
+export function titleFromPrompt(prompt: string, max = TITLE_MAX): string {
+  const lines = prompt.split(/\r?\n/).map((l) => l.trim()).filter(Boolean);
+  if (!lines.length) return preview(prompt, max);
+  const labelled = /^title\s*[:：]\s*(.*)$/i.exec(lines[0]);
+  const title = (labelled ? labelled[1] : lines[0]) || lines[1] || '';
+  return title ? clipTitle(title.replace(/\s+/g, ' '), max) : preview(prompt, max);
 }
 
 export interface EntryOptions {

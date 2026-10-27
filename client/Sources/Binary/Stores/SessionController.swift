@@ -365,6 +365,19 @@ final class SessionController {
         }
     }
 
+    /// Ends the turn another program is running here and makes this client the
+    /// holder (POST /sessions/{id}/takeover), so sending no longer queues.
+    func takeover() async {
+        do {
+            try await conn.takeover(id)
+            notice = tr("Took over this session from the other program.")
+        } catch let e as APIError where e.status == 404 || e.status == 405 {
+            notice = tr("This server can't take over sessions yet (it needs a newer binaryd).")
+        } catch {
+            notice = error.localizedDescription
+        }
+    }
+
     func stopProcess() async {
         do {
             try await conn.stop(id)

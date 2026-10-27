@@ -219,6 +219,16 @@ final class ServerConnection: Identifiable {
         let _: OK = try await requireAPI().post("/sessions/\(id)/tasks/\(task)/stop")
     }
 
+    /// Takes a session over from the program running it (POST /sessions/{id}/takeover):
+    /// ends that turn and makes this server the holder.
+    @discardableResult
+    func takeover(_ id: String) async throws -> SessionSummary {
+        struct Response: Decodable { var session: SessionSummary }
+        let r: Response = try await requireAPI().post("/sessions/\(id)/takeover")
+        upsert(r.session)
+        return r.session
+    }
+
     /// PATCH /sessions/{id}; returns the updated summary.
     @discardableResult
     func update(_ id: String, _ u: SettingsUpdate) async throws -> SessionSummary {

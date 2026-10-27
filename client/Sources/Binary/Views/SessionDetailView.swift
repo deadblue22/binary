@@ -139,6 +139,10 @@ struct SessionDetailView: View {
         if let s = summary {
             Button(tr("Copy Working Directory")) { copy(s.cwd) }
         }
+        if summary?.external?.working == true {
+            Divider()
+            Button(tr("Take Over and Interrupt")) { Task { await controller.takeover() } }
+        }
         Divider()
         Button(tr("Stop Process")) { Task { await controller.stopProcess() } }
             .disabled(summary?.live != true)

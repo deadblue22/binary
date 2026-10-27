@@ -248,10 +248,16 @@ export function createHandler(o: ApiOptions): (req: IncomingMessage, res: Server
     return undefined;
   });
 
+  // Takes the session from the program running a turn in it: ends that turn,
+  // makes this server the holder, and answers with the refreshed session.
+  route('POST', '/api/v1/sessions/{id}/takeover', async ({ params }) => {
+    const result = m.takeover(params.id);
+    return ok({ session: m.summary(params.id), ...(result.former && { former: result.former }) });
+  });
+
   route('POST', '/api/v1/sessions/{id}/interrupt', async ({ params }) => {
-    const s = sessionOr404(params.id);
     try {
-      await s.interrupt();
+      await m.interrupt(params.id);
     } catch (err) {
       throw new ApiFailure(err instanceof NotLiveError ? 409 : 502, errorText(err));
     }
