@@ -23,6 +23,8 @@ struct NewSessionView: View {
     @State private var error: String?
     @State private var picking = false
     @State private var browsing = false
+    /// Which server "Open Folder…" browses when it isn't the one in the composer.
+    @State private var browseServer: UUID?
     @State private var editing: EditRequest?
     @State private var paste = PasteCatcher()
     @State private var dropTarget = false
@@ -37,6 +39,16 @@ struct NewSessionView: View {
     }
 
     private var conn: ServerConnection? { target.flatMap { store.connection($0.server) } }
+    /// The server "Open Folder…" browses: the one picked in the project list,
+    /// otherwise the one already in the composer.
+    private var browseConnection: ServerConnection? {
+        browseServer.flatMap { store.connection($0) } ?? conn ?? store.orderedConnections.first
+    }
+    /// A folder on another server can't start from this one's path.
+    private var browseInitial: String {
+        guard browseServer == nil || browseServer == target?.server else { return "~" }
+        return folder.isEmpty ? "~" : folder
+    }
     private var project: Project? { projects.project(target?.project) }
     private var folder: String { target?.folder ?? "" }
     private var parentSummary: SessionSummary? {
@@ -84,6 +96,7 @@ struct NewSessionView: View {
         #endif
         .onAppear(perform: setUp)
         .onDisappear { paste.remove(); composingWatcher.remove() }
+        .onChange(of: browsing) { _, open in if !open { browseServer = nil } }
         .onChange(of: focused) { _, f in paste.active = f }
         .onChange(of: text) { _, _ in composing = focused && ComposingWatcher.composing() }
         .onChange(of: nav.effortStep) { _, step in stepEffort(step.delta) }
@@ -93,8 +106,9 @@ struct NewSessionView: View {
             if !Task.isCancelled { focused = true }
         }
         .sheet(isPresented: $browsing) {
-            if let c = conn ?? store.orderedConnections.first {
-                DirectoryBrowser(conn: c, initial: folder.isEmpty ? "~" : folder) { path in
+            if let c = browseConnection {
+                DirectoryBrowser(conn: c, initial: browseInitial) { path in
+                    browseServer = nil
                     pickFolder(server: c.id, path)
                 }
             }
@@ -136,8 +150,34 @@ struct NewSessionView: View {
                     .font(theme.font(.caption))
                     .foregroundStyle(theme.c.warning)
             }
+            #if os(macOS)
+            if parent == nil { shortcutHints }
+            #endif
         }
         .padding(.horizontal, theme.gutter)
+    }
+
+    /// The one key this screen answers to that isn't in the menu bar, written
+    /// faintly under the title so the blank screen shows it without competing
+    /// with the composer.
+    private var shortcutHints: some View {
+        hint("⌥⌘0", tr("New Project"))
+            .foregroundStyle(theme.c.textFaint)
+            .opacity(0.55)
+            .allowsHitTesting(false)
+            .accessibilityHidden(true)
+            .padding(.top, 34)
+    }
+
+    /// Key and action as one centered pair: no fixed key column, so the pair
+    /// sits on the same axis as the icon and title above it.
+    private func hint(_ key: String, _ label: String) -> some View {
+        HStack(spacing: 12) {
+            Text(key)
+                .font(theme.font(.body).weight(.medium))
+            Text(label)
+                .font(theme.font(.body))
+        }
     }
 
     // MARK: Composer
@@ -256,9 +296,9 @@ struct NewSessionView: View {
             ProjectPicker(current: target, onPick: { t in
                 picking = false
                 if let p = projects.project(t.project) { choose(p) } else { pickFolder(server: t.server, t.folder) }
-            }, onNew: {
+            }, onNew: { server in
                 picking = false
-                newProject()
+                newProject(on: server)
             }, onEdit: { p in
                 picking = false
                 editing = EditRequest(project: p, isNew: false)
@@ -267,8 +307,9 @@ struct NewSessionView: View {
                 var p = Project(name: Project.defaultName(for: path), server: server, folder: path)
                 p.startConfig = projects.config(for: StartTarget(server: server, folder: path, project: nil))
                 editing = EditRequest(project: p, isNew: true)
-            }, onBrowse: {
+            }, onBrowse: { server in
                 picking = false
+                browseServer = server
                 browsing = true
             })
             .environment(store)
@@ -440,9 +481,13 @@ struct NewSessionView: View {
         config = projects.config(for: t)
     }
 
-    private func newProject() {
-        let s = target?.server ?? store.orderedConnections.first?.id ?? UUID()
-        var p = Project(name: folder.isEmpty ? "" : Project.defaultName(for: folder), server: s, folder: folder)
+    private func newProject(on server: UUID? = nil) {
+        let s = server ?? target?.server ?? store.orderedConnections.first?.id ?? UUID()
+        // Only the server already in the composer brings its folder along.
+        let keepFolder = server == nil || server == target?.server
+        var p = Project(name: keepFolder && !folder.isEmpty ? Project.defaultName(for: folder) : "",
+                        server: s,
+                        folder: keepFolder ? folder : "")
         p.startConfig = config
         editing = EditRequest(project: p, isNew: true)
     }

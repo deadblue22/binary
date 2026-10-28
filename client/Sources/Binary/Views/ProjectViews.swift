@@ -2,25 +2,34 @@ import SwiftUI
 
 // MARK: - Picker
 
-/// The project list in the New Session sheet, after Claude desktop's
-/// environment picker: search, starred (⌥⌘1…9), per-server projects and
-/// recent folders, and "New Project…" (⌥⌘0).
+/// Where a new session starts, in two steps: the server first, then that
+/// server's projects and recent folders. Starred projects (⌥⌘1…9) skip the
+/// list, and "New Project…" (⌥⌘0) opens the editor for the server in view.
 struct ProjectPicker: View {
     let current: StartTarget?
     let onPick: (StartTarget) -> Void
-    let onNew: () -> Void
+    /// nil when no server is chosen yet: the editor starts from the default one.
+    let onNew: (UUID?) -> Void
     let onEdit: (Project) -> Void
     /// The options button on a plain folder: save it as a project with its settings.
     var onEditFolder: ((UUID, String) -> Void)? = nil
-    var onBrowse: (() -> Void)? = nil
+    var onBrowse: ((UUID) -> Void)? = nil
     @Environment(ServerStore.self) private var store
     @Environment(ProjectStore.self) private var projects
     @Environment(\.theme) private var theme
     @State private var query = ""
+    /// nil: the server step. Otherwise that server's projects and folders.
+    @State private var server: UUID?
     @State private var recent: [UUID: [String]] = [:]
     @FocusState private var searchFocused: Bool
 
     private var q: String { query.trimmingCharacters(in: .whitespaces).lowercased() }
+    private var conn: ServerConnection? { server.flatMap { store.connection($0) } }
+    private var visibleServers: [ServerConnection] {
+        store.orderedConnections.filter {
+            q.isEmpty || $0.displayName.lowercased().contains(q) || $0.config.url.lowercased().contains(q)
+        }
+    }
 
     private func matches(_ name: String, _ folder: String) -> Bool {
         q.isEmpty || name.lowercased().contains(q) || folder.lowercased().contains(q)
@@ -30,7 +39,8 @@ struct ProjectPicker: View {
         VStack(spacing: 0) {
             HStack(spacing: 6) {
                 Image(systemName: "magnifyingglass").foregroundStyle(theme.c.textFaint)
-                PlainField(placeholder: tr("Search projects and folders…"), text: $query, focus: $searchFocused)
+                PlainField(placeholder: conn == nil ? tr("Search servers…") : tr("Search projects and folders…"),
+                           text: $query, focus: $searchFocused)
                     .foregroundStyle(theme.c.text)
             }
             .font(theme.font(.callout))
@@ -39,30 +49,10 @@ struct ProjectPicker: View {
             Rectangle().fill(theme.c.border).frame(height: 1)
             ScrollView {
                 VStack(alignment: .leading, spacing: 0) {
-                    let favs = projects.favorites.filter { matches($0.name, $0.folder) }
-                    if !favs.isEmpty {
-                        header(tr("Starred"))
-                        ForEach(Array(favs.enumerated()), id: \.element.id) { i, p in
-                            projectRow(p, shortcut: i < 9 ? i + 1 : nil)
-                        }
-                        divider
-                    }
-                    ForEach(store.orderedConnections) { conn in
-                        let own = projects.projects(on: conn.id).filter { !$0.starred && matches($0.name, $0.folder) }
-                        let known = Set(projects.projects(on: conn.id).map(\.folder))
-                        let dirs = (recent[conn.id] ?? []).filter { !known.contains($0) && matches(Project.defaultName(for: $0), $0) }
-                        if !own.isEmpty || !dirs.isEmpty {
-                            header(conn.displayName, icon: "server.rack")
-                            ForEach(own) { p in projectRow(p, shortcut: nil) }
-                            ForEach(dirs, id: \.self) { d in folderRow(conn.id, d) }
-                            divider
-                        }
-                    }
-                    if projects.projects.isEmpty && recent.values.allSatisfy(\.isEmpty) {
-                        Text(tr("No projects yet. Add one below, or pick a folder."))
-                            .font(theme.font(.caption))
-                            .foregroundStyle(theme.c.textFaint)
-                            .padding(12)
+                    if let conn {
+                        folders(conn)
+                    } else {
+                        servers
                     }
                 }
                 .padding(.vertical, 4)
@@ -70,14 +60,16 @@ struct ProjectPicker: View {
             }
             .frame(maxHeight: 440)
             .fixedSize(horizontal: false, vertical: true)
-            Rectangle().fill(theme.c.border).frame(height: 1)
-            VStack(spacing: 0) {
-                if let onBrowse {
-                    PickerRow(icon: "folder.badge.plus", title: tr("Open Folder…"), action: onBrowse)
+            if let conn {
+                Rectangle().fill(theme.c.border).frame(height: 1)
+                VStack(spacing: 0) {
+                    if let onBrowse {
+                        PickerRow(icon: "folder.badge.plus", title: tr("Open Folder…")) { onBrowse(conn.id) }
+                    }
+                    PickerRow(icon: "plus", title: tr("New Project…"), shortcut: "⌥⌘0") { onNew(conn.id) }
                 }
-                PickerRow(icon: "plus", title: tr("New Project…"), shortcut: "⌥⌘0", action: onNew)
+                .padding(.vertical, 4)
             }
-            .padding(.vertical, 4)
         }
         .frame(width: 400)
         .background(theme.c.surface)
@@ -88,14 +80,107 @@ struct ProjectPicker: View {
                     .keyboardShortcut(KeyEquivalent(Character("\(i + 1)")), modifiers: [.command, .option])
                     .hidden()
             }
-            Button("", action: onNew).keyboardShortcut("0", modifiers: [.command, .option]).hidden()
+            Button("") { onNew(conn?.id) }.keyboardShortcut("0", modifiers: [.command, .option]).hidden()
         }
-        .onAppear { searchFocused = true }
+        .onAppear {
+            searchFocused = true
+            // With one server the server step has nothing to choose.
+            if store.orderedConnections.count == 1 { server = store.orderedConnections.first?.id }
+            // BINARY_PROJECT_SERVER=<n>: open straight on that server's folders.
+            if let n = DebugHooks.env["BINARY_PROJECT_SERVER"].flatMap(Int.init),
+               store.orderedConnections.indices.contains(n) {
+                server = store.orderedConnections[n].id
+            }
+        }
         .task {
             for conn in store.orderedConnections where conn.status == .online {
                 recent[conn.id] = (try? await conn.recentDirs()) ?? []
             }
         }
+    }
+
+    // MARK: Steps
+
+    /// The server step: which machine the session runs on.
+    private var servers: some View {
+        ForEach(visibleServers) { c in
+            PickerRow(icon: "server.rack",
+                      title: c.displayName,
+                      subtitle: serverSubtitle(c),
+                      checked: current?.server == c.id) {
+                query = ""
+                server = c.id
+            }
+        }
+    }
+
+    private func serverSubtitle(_ c: ServerConnection) -> String {
+        var parts: [String] = []
+        if case .offline = c.status { parts.append(tr("Offline")) }
+        parts.append(tr("\(projects.projects(on: c.id).count) projects"))
+        parts.append(c.config.url)
+        return parts.joined(separator: " · ")
+    }
+
+    /// The folder step: one server's projects, then folders used recently.
+    @ViewBuilder
+    private func folders(_ c: ServerConnection) -> some View {
+        backRow(c)
+        let all = projects.projects(on: c.id)
+        let favs = all.filter { $0.starred && matches($0.name, $0.folder) }
+        let rest = all.filter { !$0.starred && matches($0.name, $0.folder) }
+        let known = Set(all.map(\.folder))
+        let dirs = (recent[c.id] ?? []).filter { !known.contains($0) && matches(Project.defaultName(for: $0), $0) }
+        if !favs.isEmpty {
+            header(tr("Starred"))
+            ForEach(favs) { p in projectRow(p, shortcut: shortcutNumber(p).map { "⌥⌘\($0)" }) }
+            divider
+        }
+        if !rest.isEmpty {
+            header(tr("Projects"))
+            ForEach(rest) { p in projectRow(p, shortcut: shortcutNumber(p).map { "⌥⌘\($0)" }) }
+            divider
+        }
+        if !dirs.isEmpty {
+            header(tr("Recent"))
+            ForEach(dirs, id: \.self) { d in folderRow(c.id, d) }
+            divider
+        }
+        if favs.isEmpty && rest.isEmpty && dirs.isEmpty {
+            Text(q.isEmpty ? tr("No projects yet. Add one below, or pick a folder.")
+                           : tr("No matching projects or folders."))
+                .font(theme.font(.caption))
+                .foregroundStyle(theme.c.textFaint)
+                .padding(12)
+        }
+    }
+
+    /// Back to the server step; the server's own projects stay one tap away.
+    private func backRow(_ c: ServerConnection) -> some View {
+        Button {
+            query = ""
+            server = nil
+        } label: {
+            HStack(spacing: 6) {
+                Image(systemName: "chevron.left")
+                    .font(.system(size: theme.size(.small), weight: .semibold))
+                Text(c.displayName).font(theme.font(.small).weight(.medium))
+                Spacer(minLength: 6)
+                Text(tr("All servers")).font(theme.font(.small))
+            }
+            .foregroundStyle(theme.c.textFaint)
+            .padding(.horizontal, 14)
+            .padding(.vertical, 6)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .help(tr("Choose another server"))
+    }
+
+    /// The ⌥⌘ number a starred project answers to on this Mac, if any.
+    private func shortcutNumber(_ p: Project) -> Int? {
+        guard let i = projects.favorites.firstIndex(where: { $0.id == p.id }), i < 9 else { return nil }
+        return i + 1
     }
 
     private func pick(_ p: Project) {
@@ -118,11 +203,11 @@ struct ProjectPicker: View {
         Rectangle().fill(theme.c.border).frame(height: 1).padding(.horizontal, 12).padding(.vertical, 4)
     }
 
-    private func projectRow(_ p: Project, shortcut: Int?) -> some View {
+    private func projectRow(_ p: Project, shortcut: String?) -> some View {
         PickerRow(icon: p.worktree ? "square.stack.3d.up" : "folder",
                   title: p.name,
                   subtitle: [Format.path(p.folder, cwd: nil), p.branch, p.worktree ? "worktree" : nil].compactMap { $0 }.joined(separator: " · "),
-                  shortcut: shortcut.map { "⌥⌘\($0)" },
+                  shortcut: shortcut,
                   checked: current?.project == p.id,
                   starred: p.starred,
                   onStar: { projects.setStarred(p.id, !p.starred) },
