@@ -58,10 +58,10 @@ struct ToolCallView: View {
     private var header: some View {
         HStack(spacing: 9) {
             IconTile(icon: ToolInfo.icon(name), tint: ToolInfo.tint(name, theme), size: 22 * min(theme.scale, 1.25))
-            Text(ToolInfo.title(name))
+            SearchText(ToolInfo.title(name))
                 .font(theme.font(.callout).weight(.semibold))
                 .foregroundStyle(theme.c.text)
-            Text(ToolInfo.summary(name, input, cwd: cwd))
+            SearchText(ToolInfo.summary(name, input, cwd: cwd))
                 .font(ToolInfo.monoSummary(name) ? theme.mono(theme.size(.callout) - 0.5) : theme.font(.callout))
                 .foregroundStyle(theme.c.textMuted)
                 .lineLimit(1)
@@ -82,10 +82,10 @@ struct ToolCallView: View {
                 .font(.system(size: theme.size(.caption) - 1))
                 .foregroundStyle(ToolInfo.tint(name, theme).opacity(0.8))
                 .frame(width: 14)
-            Text(ToolInfo.title(name))
+            SearchText(ToolInfo.title(name))
                 .font(theme.font(.caption).weight(.medium))
                 .foregroundStyle(theme.c.textMuted)
-            Text(ToolInfo.summary(name, input, cwd: cwd))
+            SearchText(ToolInfo.summary(name, input, cwd: cwd))
                 .font(ToolInfo.monoSummary(name) ? theme.mono(theme.size(.caption) - 0.5) : theme.font(.caption))
                 .foregroundStyle(theme.c.textFaint)
                 .lineLimit(1)
@@ -305,7 +305,9 @@ struct ToolInputView: View {
     }
 
     private var path: some View {
-        Label(input["file_path"]?.string.map { Format.path($0, cwd: cwd) } ?? "", systemImage: "doc")
+        Label {
+            SearchText(input["file_path"]?.string.map { Format.path($0, cwd: cwd) } ?? "")
+        } icon: { Image(systemName: "doc") }
             .font(theme.mono(theme.size(.caption)))
             .foregroundStyle(theme.c.textMuted)
             .textSelection(.enabled)
@@ -342,7 +344,7 @@ struct TodoList: View {
                 HStack(alignment: .firstTextBaseline, spacing: 8) {
                     Image(systemName: status == "completed" ? "checkmark.circle.fill" : status == "in_progress" ? "circle.inset.filled" : "circle")
                         .foregroundStyle(status == "completed" ? theme.c.success : status == "in_progress" ? theme.c.running : theme.c.textFaint)
-                    Text(status == "in_progress" ? (t["activeForm"]?.string ?? t["content"]?.string ?? "") : (t["content"]?.string ?? ""))
+                    SearchText(status == "in_progress" ? (t["activeForm"]?.string ?? t["content"]?.string ?? "") : (t["content"]?.string ?? ""))
                         .strikethrough(status == "completed", color: theme.c.textFaint)
                         .foregroundStyle(status == "completed" ? theme.c.textMuted : theme.c.text)
                         .fontWeight(status == "in_progress" ? .medium : .regular)
@@ -359,7 +361,7 @@ struct DetailLabel: View {
     @Environment(\.theme) private var theme
 
     var body: some View {
-        Text(text)
+        SearchText(text)
             .font(theme.font(.small).weight(.semibold))
             .foregroundStyle(tint ?? theme.c.textFaint)
             .textCase(.uppercase)

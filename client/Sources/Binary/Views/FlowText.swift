@@ -181,6 +181,7 @@ struct FlowText: NSViewRepresentable {
     let text: NSAttributedString
     let linkColor: NSColor
     @Environment(\.fileLinkHandler) private var links
+    @Environment(\.searchHighlight) private var highlight
 
     func makeCoordinator() -> LinkRouter { LinkRouter() }
 
@@ -213,7 +214,7 @@ struct FlowText: NSViewRepresentable {
         tv.isHorizontallyResizable = false
         tv.setContentHuggingPriority(.defaultLow, for: .horizontal)
         tv.linkTextAttributes = [.foregroundColor: linkColor, .cursor: NSCursor.pointingHand]
-        storage.setAttributedString(text)
+        storage.setAttributedString(highlight.apply(text))
         context.coordinator.handler = links
         tv.delegate = context.coordinator
         return tv
@@ -221,6 +222,7 @@ struct FlowText: NSViewRepresentable {
 
     func updateNSView(_ tv: FlowTextView, context: Context) {
         context.coordinator.handler = links
+        let text = highlight.apply(text)
         if tv.textStorage?.isEqual(to: text) == false {
             tv.textStorage?.setAttributedString(text)
         }
@@ -251,6 +253,7 @@ struct FlowText: UIViewRepresentable {
     let text: NSAttributedString
     let linkColor: UIColor
     @Environment(\.fileLinkHandler) private var links
+    @Environment(\.searchHighlight) private var highlight
 
     func makeCoordinator() -> LinkRouter { LinkRouter() }
 
@@ -274,7 +277,7 @@ struct FlowText: UIViewRepresentable {
         tv.setContentHuggingPriority(.defaultLow, for: .horizontal)
         tv.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
         tv.linkTextAttributes = [.foregroundColor: linkColor]
-        tv.attributedText = text
+        tv.attributedText = highlight.apply(text)
         context.coordinator.handler = links
         tv.delegate = context.coordinator
         return tv
@@ -282,6 +285,7 @@ struct FlowText: UIViewRepresentable {
 
     func updateUIView(_ tv: UITextView, context: Context) {
         context.coordinator.handler = links
+        let text = highlight.apply(text)
         if tv.attributedText?.isEqual(to: text) != true {
             tv.attributedText = text
         }

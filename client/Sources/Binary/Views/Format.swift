@@ -385,7 +385,7 @@ struct MonoBox: View {
     var body: some View {
         let shape = RoundedRectangle(cornerRadius: theme.controlRadius - 2, style: .continuous)
         ScrollView(.vertical) {
-            Text(text.isEmpty ? " " : text)
+            SearchText(text.isEmpty ? " " : text)
                 .font(theme.font(.monoSmall))
                 .lineSpacing(theme.monoLineSpacing)
                 .foregroundStyle(theme.c.text)

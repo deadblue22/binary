@@ -286,7 +286,7 @@ struct MarkdownBlockView: View {
         case .code(let lang, let code):
             CodeBlockView(lang: lang, code: code)
         case .quote(let s):
-            Text(inline(s))
+            SearchText(inline(s))
                 .font(theme.font(role))
                 .lineSpacing(theme.lineSpacing)
                 .foregroundStyle(theme.c.textMuted)
@@ -338,7 +338,7 @@ struct MarkdownTable: View {
             ForEach(Array(rows.enumerated()), id: \.offset) { ri, row in
                 GridRow {
                     ForEach(0..<columns, id: \.self) { ci in
-                        Text(MarkdownCache.shared.inline(ci < row.count ? row[ci] : "", theme: theme, size: size))
+                        SearchText(MarkdownCache.shared.inline(ci < row.count ? row[ci] : "", theme: theme, size: size))
                             .font(theme.text(size).weight(ri == 0 ? .semibold : .regular))
                             .foregroundStyle(ri == 0 ? theme.c.heading : theme.c.text)
                             .lineSpacing(theme.lineSpacing * 0.5)
@@ -399,7 +399,7 @@ struct CodeBlockView: View {
             .background(theme.c.codeHeader)
             Rectangle().fill(theme.c.border.opacity(0.7)).frame(height: 1)
             ScrollView(.horizontal) {
-                Text(code)
+                SearchText(code)
                     .font(theme.font(.mono))
                     .lineSpacing(theme.monoLineSpacing)
                     .foregroundStyle(theme.c.text)

@@ -13,6 +13,7 @@ struct TranscriptView<Source: TranscriptSource>: View {
     @State private var matches: [String] = []
     @State private var selectedMatch: String?
     @State private var finding = false
+    @State private var searchOptions = TranscriptSearch.Options()
     @FocusState private var searchFocused: Bool
     @State private var atBottom = true
     /// Last seen position of the transcript's end within its content.
@@ -52,12 +53,15 @@ struct TranscriptView<Source: TranscriptSource>: View {
 
     @ViewBuilder
     private func rowsView(_ rows: [TranscriptItem], busy: Bool, viewport: CGFloat) -> some View {
+        let matchingRows = Set(matches)
         ForEach(TranscriptChunks.split(rows)) { chunk in
             TranscriptChunk(viewport: viewport, generation: measureGeneration) {
                 ForEach(chunk.range, id: \.self) { i in
                     // Rows that didn't change aren't drawn again when the list is rebuilt.
                     TranscriptRow(item: rows[i], busy: busy, cwd: source.cwd)
                         .equatable()
+                        .environment(\.searchHighlight, SearchHighlight(query: searching && matchingRows.contains(rows[i].id) ? query : "",
+                                                                         selected: selectedMatch == rows[i].id))
                         .background {
                             if highlighted == rows[i].id || (searching && selectedMatch == rows[i].id) {
                                 RoundedRectangle(cornerRadius: 8, style: .continuous)
@@ -239,7 +243,7 @@ struct TranscriptView<Source: TranscriptSource>: View {
             searching = true
             searchFocused = true
         }
-        .task(id: searching ? query : "") { await find() }
+        .task(id: [searching ? query : "", String(searchOptions.tools), String(searchOptions.thinking)]) { await find() }
         .onChange(of: source.items) { _, _ in
             if searching { updateMatches() }
         }
@@ -253,6 +257,14 @@ struct TranscriptView<Source: TranscriptSource>: View {
             PlainField(placeholder: tr("Find in conversation"), text: $query, focus: $searchFocused)
                 .onSubmit { stepMatch(1) }
                 .onExitCommand { closeSearch() }
+            Menu {
+                Toggle(tr("Include Tools"), isOn: $searchOptions.tools)
+                Toggle(tr("Include Thinking"), isOn: $searchOptions.thinking)
+            } label: {
+                Label(tr("Search Options"), systemImage: "line.3.horizontal.decrease.circle")
+            }
+            .menuStyle(.borderlessButton)
+            .fixedSize()
             if finding { ProgressView().controlSize(.small) }
             Text(query.isEmpty ? "" : "\(selectedMatch.flatMap { matches.firstIndex(of: $0) }.map { $0 + 1 } ?? 0) / \(matches.count)")
                 .monospacedDigit()
@@ -299,7 +311,7 @@ struct TranscriptView<Source: TranscriptSource>: View {
     }
 
     private func updateMatches() {
-        matches = TranscriptSearch.matches(in: source.items, query: query)
+        matches = TranscriptSearch.matches(in: source.items, query: query, options: searchOptions)
         if selectedMatch.map({ !matches.contains($0) }) ?? true {
             selectedMatch = matches.first
         }
@@ -513,7 +525,7 @@ struct UserMessageView: View {
                 }
                 if !text.isEmpty {
                     VStack(alignment: .leading, spacing: 8) {
-                        Text(long && !expanded ? String(text.prefix(1600)) + "…" : text)
+                        SearchText(long && !expanded ? String(text.prefix(1600)) + "…" : text)
                             .font(theme.font(.body))
                             .lineSpacing(theme.lineSpacing * 0.8)
                             .foregroundStyle(theme.c.userText)
@@ -572,7 +584,7 @@ struct ThinkingView: View {
             .buttonStyle(.plain)
             if expanded {
                 // Thinking blocks often end with blank lines.
-                Text(text.trimmingCharacters(in: .whitespacesAndNewlines))
+                SearchText(text.trimmingCharacters(in: .whitespacesAndNewlines))
                     .font(theme.font(.callout))
                     .lineSpacing(theme.lineSpacing * 0.8)
                     .foregroundStyle(theme.c.textMuted)
@@ -631,7 +643,7 @@ struct SystemRow: View {
         } else {
             HStack(alignment: .top, spacing: 6) {
                 Image(systemName: icon)
-                Text(text)
+                SearchText(text)
                     .textSelection(.enabled)
                     .lineLimit(expanded ? nil : 4)
                     .onTapGesture { expanded.toggle() }
@@ -696,7 +708,7 @@ struct TaskNotificationRow: View {
             } label: {
                 HStack(spacing: 9) {
                     IconTile(icon: isError ? "exclamationmark.octagon" : (icon ?? "bell"), tint: tint, size: 22 * min(theme.scale, 1.25))
-                    Text(p.summary)
+                    SearchText(p.summary)
                         .font(theme.font(.callout).weight(dim ? .regular : .medium))
                         .foregroundStyle(dim ? theme.c.textMuted : theme.c.text)
                         .lineLimit(p.body.isEmpty ? 2 : 1)
@@ -733,7 +745,7 @@ struct ResultRow: View {
     var body: some View {
         let parts = [Format.duration(entry.durationMs), Format.cost(entry.costUsd).map { tr("total ") + $0 }].compactMap { $0 }
         if entry.isError == true, let t = entry.text, !t.isEmpty {
-            Label(t, systemImage: "xmark.octagon")
+            Label { SearchText(t) } icon: { Image(systemName: "xmark.octagon") }
                 .font(theme.font(.caption))
                 .foregroundStyle(theme.c.danger)
                 .textSelection(.enabled)
@@ -765,7 +777,7 @@ struct ActivityRow: View {
             } else {
                 ProgressView().controlSize(.small)
             }
-            Text(text)
+            SearchText(text)
                 .font(theme.font(.callout))
                 .foregroundStyle(theme.c.textMuted)
                 .lineLimit(1)
