@@ -7,6 +7,13 @@ struct TranscriptView<Source: TranscriptSource>: View {
     var jump: TranscriptJump? = nil
     var onJumped: () -> Void = {}
     @Environment(\.theme) private var theme
+    @Environment(Navigation.self) private var nav
+    @State private var searching = false
+    @State private var query = ""
+    @State private var matches: [String] = []
+    @State private var selectedMatch: String?
+    @State private var finding = false
+    @FocusState private var searchFocused: Bool
     @State private var atBottom = true
     /// Last seen position of the transcript's end within its content.
     @State private var contentEnd: CGFloat = 0
@@ -52,7 +59,7 @@ struct TranscriptView<Source: TranscriptSource>: View {
                     TranscriptRow(item: rows[i], busy: busy, cwd: source.cwd)
                         .equatable()
                         .background {
-                            if highlighted == rows[i].id {
+                            if highlighted == rows[i].id || (searching && selectedMatch == rows[i].id) {
                                 RoundedRectangle(cornerRadius: 8, style: .continuous)
                                     .fill(theme.c.focus.opacity(0.14))
                                     .padding(-6)
@@ -195,6 +202,11 @@ struct TranscriptView<Source: TranscriptSource>: View {
                     await show(jump.uuid, proxy)
                     if !Task.isCancelled { onJumped() }
                 }
+                .task(id: selectedMatch) {
+                    guard searching, let selectedMatch else { return }
+                    expansion.open[selectedMatch] = true
+                    await show(selectedMatch, proxy)
+                }
                 // Rows drawn as placeholders keep their old height through a resize;
                 // measure them again once it settles.
                 .task(id: MeasureKey(width: geo.size.width, theme: theme)) {
@@ -219,6 +231,101 @@ struct TranscriptView<Source: TranscriptSource>: View {
                 #endif
             }
         }
+        #if os(macOS)
+        .safeAreaInset(edge: .top, spacing: 0) {
+            if searching { searchBar }
+        }
+        .onChange(of: nav.transcriptSearchRequest) { _, _ in
+            searching = true
+            searchFocused = true
+        }
+        .task(id: searching ? query : "") { await find() }
+        .onChange(of: source.items) { _, _ in
+            if searching { updateMatches() }
+        }
+        #endif
+    }
+
+    #if os(macOS)
+    private var searchBar: some View {
+        HStack(spacing: 10) {
+            Image(systemName: "magnifyingglass")
+            PlainField(placeholder: tr("Find in conversation"), text: $query, focus: $searchFocused)
+                .onSubmit { stepMatch(1) }
+                .onExitCommand { closeSearch() }
+            if finding { ProgressView().controlSize(.small) }
+            Text(query.isEmpty ? "" : "\(selectedMatch.flatMap { matches.firstIndex(of: $0) }.map { $0 + 1 } ?? 0) / \(matches.count)")
+                .monospacedDigit()
+                .help(tr("Matching messages"))
+            if source.hasMore && !finding && !query.isEmpty {
+                Text(tr("Loaded messages only"))
+            }
+            Button { stepMatch(-1) } label: {
+                Label(tr("Previous Match"), systemImage: "chevron.up")
+            }
+            .keyboardShortcut("g", modifiers: [.command, .shift])
+            .disabled(matches.isEmpty)
+            Button { stepMatch(1) } label: {
+                Label(tr("Next Match"), systemImage: "chevron.down")
+            }
+            .keyboardShortcut("g")
+            .disabled(matches.isEmpty)
+            Button { closeSearch() } label: {
+                Label(tr("Close Search"), systemImage: "xmark")
+            }
+        }
+        .labelStyle(.iconOnly)
+        .buttonStyle(.plain)
+        .font(theme.font(.callout))
+        .foregroundStyle(theme.c.textMuted)
+        .padding(.horizontal, theme.gutter)
+        .padding(.vertical, 10)
+        .background(theme.c.surfaceAlt)
+    }
+    #endif
+
+    private func closeSearch() {
+        searching = false
+        searchFocused = false
+        query = ""
+        matches = []
+        selectedMatch = nil
+    }
+
+    private func stepMatch(_ delta: Int) {
+        guard !matches.isEmpty else { return }
+        let index = selectedMatch.flatMap { matches.firstIndex(of: $0) } ?? 0
+        selectedMatch = matches[(index + delta + matches.count) % matches.count]
+    }
+
+    private func updateMatches() {
+        matches = TranscriptSearch.matches(in: source.items, query: query)
+        if selectedMatch.map({ !matches.contains($0) }) ?? true {
+            selectedMatch = matches.first
+        }
+    }
+
+    private func find() async {
+        selectedMatch = nil
+        updateMatches()
+        guard searching, !query.isEmpty else { finding = false; return }
+        try? await Task.sleep(nanoseconds: 250_000_000)
+        guard !Task.isCancelled else { return }
+        finding = true
+        atBottom = false
+        defer { if !Task.isCancelled { finding = false } }
+        while source.hasMore && !Task.isCancelled {
+            if source.loadingOlder {
+                try? await Task.sleep(nanoseconds: 100_000_000)
+                continue
+            }
+            let first = source.items.first?.id
+            await source.loadOlder()
+            guard !Task.isCancelled else { return }
+            updateMatches()
+            // A failed/offline request must not loop or claim a complete search.
+            if source.items.first?.id == first { break }
+        }
     }
 
     /// Scrolls to the first row of entry `uuid`, loading older pages until
@@ -241,6 +348,7 @@ struct TranscriptView<Source: TranscriptSource>: View {
                     proxy.scrollTo(TranscriptChunks.scrollID(chunk.id), anchor: .top)
                     await sleep(80)
                 }
+                guard !Task.isCancelled else { return }
                 proxy.scrollTo(row, anchor: .center)
                 withAnimation(.easeOut(duration: 0.2)) { highlighted = row }
                 // Text views settle their heights after the first layout pass.

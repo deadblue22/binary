@@ -34,8 +34,6 @@ struct ContentView: View {
             }
         }
         .background(theme.c.background)
-        // ⌘F also searches sessions, as before ⌘K became the menu shortcut.
-        .background(Button("") { nav.searchRequest += 1 }.keyboardShortcut("f").opacity(0).frame(width: 0, height: 0))
         .toolbarBackground(theme.c.background, for: .windowToolbar)
         .sheet(item: $nav.filePreview) { FilePreviewView(request: $0) }
         .task {

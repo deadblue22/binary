@@ -43,6 +43,8 @@ final class Navigation {
     @ObservationIgnored var visibleOrder: [SessionRef] = []
     /// Bumped to focus the sidebar search field.
     var searchRequest = 0
+    /// Bumped to open search within the visible transcript.
+    var transcriptSearchRequest = 0
     /// Bumped for the open session to ask for a new title (the info panel's Rename).
     var renameRequest = 0
     /// A transcript row to scroll to, picked from a search match; the

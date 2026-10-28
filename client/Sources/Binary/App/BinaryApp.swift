@@ -62,6 +62,9 @@ struct AppCommands: Commands {
             Divider()
         }
         CommandMenu("Session") {
+            Button(tr("Find in Conversation…")) { nav.transcriptSearchRequest += 1 }
+                .keyboardShortcut("f")
+                .disabled(nav.selection == nil || nav.draft != nil)
             Button(tr("Search Sessions")) { nav.searchRequest += 1 }
                 .keyboardShortcut("k")
             Divider()

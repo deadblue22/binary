@@ -9,5 +9,6 @@ let package = Package(
             name: "Binary",
             path: "Sources/Binary"
         ),
+        .testTarget(name: "BinaryTests", dependencies: ["Binary"]),
     ]
 )

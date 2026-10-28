@@ -1,4 +1,11 @@
 {
+ "Find in Conversation…": "在会话中查找…",
+ "Find in conversation": "在会话中查找",
+ "Matching messages": "匹配消息数",
+ "Loaded messages only": "仅已加载的消息",
+ "Previous Match": "上一个匹配",
+ "Next Match": "下一个匹配",
+ "Close Search": "关闭搜索",
  "\n… (truncated)": "\n… (已截断)",
  " (it has uncommitted changes)": "（目录有未提交的改动）",
  " (saved to .claude/settings.json)": "（写入 .claude/settings.json）",
