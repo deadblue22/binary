@@ -5,3 +5,4 @@
 *.test
 /client/iOS/Binary.xcodeproj/
 /client/iOS/build/
+/AGENTS.md
