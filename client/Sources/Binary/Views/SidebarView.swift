@@ -693,9 +693,9 @@ struct SidebarView: View {
             }
             if !groups.isEmpty { Divider() }
             Button(tr("New Group…")) { ask(.newGroup(conn.id, refs)) }
-            if summaries.contains(where: { $0.group != nil }) {
-                Button(tr("Remove from Group")) { move(refs, to: "") }
-            }
+        }
+        if summaries.contains(where: { $0.group != nil }) {
+            Button(tr("Remove from Group")) { move(refs, to: "") }
         }
         let allArchived = refs.allSatisfy { org.isArchived($0) }
         Button(allArchived ? tr("Unarchive") : tr("Archive")) {
