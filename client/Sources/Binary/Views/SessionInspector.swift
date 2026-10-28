@@ -100,11 +100,11 @@ struct SessionInspector: View {
                 InfoRow(icon: "questionmark.folder", label: tr("Location"), value: tr("Folder no longer exists"))
             }
             if let w = s.worktree, !w.isEmpty {
-                InfoRow(icon: "square.stack.3d.up", label: "Worktree", value: Format.path(w, cwd: nil), mono: true, help: w)
+                InfoRow(icon: "square.stack.3d.up", label: "Worktree", value: Format.path(w, cwd: nil), mono: true, scrollable: true, help: w)
             }
             InfoRow(icon: "server.rack", label: tr("Server"), value: conn.displayName,
                     help: ([conn.config.url] + (conn.info.map { ["\($0.hostname) · \($0.os)/\($0.arch) · binaryd \($0.version)"] } ?? [])).joined(separator: "\n"))
-            InfoRow(icon: "folder", label: tr("Directory"), value: Format.path(s.cwd, cwd: nil), mono: true, help: s.cwd) {
+            InfoRow(icon: "folder", label: tr("Directory"), value: Format.path(s.cwd, cwd: nil), mono: true, scrollable: true, help: s.cwd) {
                 Button { copy(s.cwd) } label: { Image(systemName: "doc.on.doc") }
                     .buttonStyle(.icon(size: 20))
                     .help(tr("Copy path"))
@@ -434,36 +434,93 @@ struct InfoRow<Trailing: View>: View {
     let label: String
     let value: String
     var mono = false
+    var scrollable = false
     var help: String? = nil
     @ViewBuilder var trailing: () -> Trailing
     @Environment(\.theme) private var theme
 
     var body: some View {
-        HStack(alignment: .firstTextBaseline, spacing: 8) {
-            Image(systemName: icon)
-                .font(.system(size: theme.size(.caption)))
-                .foregroundStyle(theme.c.textFaint)
-                .frame(width: 16)
-            Text(label)
-                .font(theme.font(.callout))
-                .foregroundStyle(theme.c.textMuted)
+        VStack(alignment: .leading, spacing: 4) {
+            HStack(alignment: .firstTextBaseline, spacing: 8) {
+                Image(systemName: icon)
+                    .font(.system(size: theme.size(.caption)))
+                    .foregroundStyle(theme.c.textFaint)
+                    .frame(width: 16)
+                Text(label)
+                    .font(theme.font(.callout))
+                    .foregroundStyle(theme.c.textMuted)
+                    .fixedSize()
+                if scrollable {
+                    Spacer(minLength: 0)
+                } else {
+                    valueText
+                        .truncationMode(.head)
+                        .frame(minWidth: 0, maxWidth: .infinity, alignment: .trailing)
+                        .clipped()
+                }
+                HStack(spacing: 8) {
+                    trailing()
+                }
                 .fixedSize()
-            Spacer(minLength: 6)
-            Text(value)
-                .font(mono ? theme.mono(theme.size(.callout) - 1) : theme.font(.callout))
-                .foregroundStyle(theme.c.text)
-                .lineLimit(1)
-                .truncationMode(.head)
-                .textSelection(.enabled)
-                .help(help ?? value)
-            trailing()
+            }
+            if scrollable {
+                #if os(macOS)
+                SelectablePath(value: value, mono: mono)
+                    .help(help ?? value)
+                #else
+                ScrollView(.horizontal) {
+                    valueText.fixedSize(horizontal: true, vertical: false)
+                }
+                .scrollIndicators(.hidden)
+                .defaultScrollAnchor(.trailing)
+                .frame(height: theme.size(.callout) + 8)
+                #endif
+            }
         }
+    }
+
+    private var valueText: some View {
+        Text(value)
+            .font(mono ? theme.mono(theme.size(.callout) - 1) : theme.font(.callout))
+            .foregroundStyle(theme.c.text)
+            .lineLimit(1)
+            .textSelection(.enabled)
+            .help(help ?? value)
     }
 }
 
+#if os(macOS)
+/// A read-only field uses AppKit's selection autoscroll without scroll bars.
+private struct SelectablePath: NSViewRepresentable {
+    let value: String
+    let mono: Bool
+    @Environment(\.theme) private var theme
+
+    func makeNSView(context: Context) -> NSTextField {
+        let field = NSTextField(labelWithString: value)
+        field.isSelectable = true
+        field.lineBreakMode = .byClipping
+        field.usesSingleLineMode = true
+        field.cell?.isScrollable = true
+        field.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+        return field
+    }
+
+    func updateNSView(_ field: NSTextField, context: Context) {
+        if field.stringValue != value { field.stringValue = value }
+        field.font = mono ? theme.nsMono(theme.size(.callout) - 1) : theme.nsText(theme.size(.callout))
+        field.textColor = NSColor(theme.c.text)
+    }
+
+    func sizeThatFits(_ proposal: ProposedViewSize, nsView: NSTextField, context: Context) -> CGSize? {
+        CGSize(width: proposal.width ?? nsView.intrinsicContentSize.width, height: nsView.intrinsicContentSize.height)
+    }
+}
+#endif
+
 extension InfoRow where Trailing == EmptyView {
-    init(icon: String, label: String, value: String, mono: Bool = false, help: String? = nil) {
-        self.init(icon: icon, label: label, value: value, mono: mono, help: help) { EmptyView() }
+    init(icon: String, label: String, value: String, mono: Bool = false, scrollable: Bool = false, help: String? = nil) {
+        self.init(icon: icon, label: label, value: value, mono: mono, scrollable: scrollable, help: help) { EmptyView() }
     }
 }
 
