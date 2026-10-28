@@ -30,6 +30,7 @@ import AppKit
 ///   BINARY_EFFORT_PANEL=1          open the effort panel 2.5 s after launch
 ///   BINARY_LOAD_OLDER=1            fetch earlier messages 2.5 s after a session opens
 ///   BINARY_PROJECT_PICKER=1        with BINARY_NEW_SESSION: open the project list
+///   BINARY_PROJECT_SERVER=<n>      with BINARY_PROJECT_PICKER: start on the n-th server's folders
 ///   BINARY_EDIT_PROJECT=new|current with BINARY_NEW_SESSION: open the project editor
 ///   BINARY_PREVIEW=<path>          with BINARY_SELECT: preview that file (relative to its folder)
 ///   BINARY_MOVE=<id>=<group>       move a session into a group (PATCH tag) after 2 s

@@ -7,13 +7,15 @@ ROOT=$(cd .. && pwd)
 OUT=${OUT:-$ROOT/dist}
 APP="$OUT/Binary.app"
 
-ARCH_FLAGS=()
+# macOS ships bash 3.2, where an empty array under `set -u` is an error:
+# keep the always-present flags in the array instead of expanding an empty one.
+FLAGS=(-c release)
 if [[ "${UNIVERSAL:-0}" == "1" ]]; then
-  ARCH_FLAGS=(--arch arm64 --arch x86_64)
+  FLAGS+=(--arch arm64 --arch x86_64)
 fi
 
-swift build -c release "${ARCH_FLAGS[@]}"
-BIN_DIR=$(swift build -c release "${ARCH_FLAGS[@]}" --show-bin-path)
+swift build "${FLAGS[@]}"
+BIN_DIR=$(swift build "${FLAGS[@]}" --show-bin-path)
 
 if [[ ! -f Resources/AppIcon.icns ]]; then
   scripts/make-icon.sh || echo "warning: icon generation failed, continuing without icon"

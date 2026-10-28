@@ -177,7 +177,8 @@ Each session takes a single row; activity descriptions and errors are in the too
 - The menu next to the send button has "Fork and Continue Here": it makes a copy with the same directory, settings and group to continue in Binary, nested under the original session, leaving the original untouched.
 
 ### New sessions, projects, child sessions
-- ⌘N creates a new session. At the top of the dialog is "Project"; clicking it opens the project list (modeled on the environment picker in the Claude desktop app): search, starred projects (⌥⌘1…9), projects listed by server, recently used directories, and finally "New Project…" (⌥⌘0). Hover over a row to star or edit it; starring a recent directory saves it as a project.
+- ⌘N creates a new session. At the top of the dialog is "Project"; clicking it picks where the session runs in two steps: the server first (its URL, project count and whether it's online), then that server's projects and recently used folders. With a single server the first step is skipped. "New Project…" (⌥⌘0) opens the editor for the server in view, and starred projects (⌥⌘1…9) skip the list. Hover over a row to star or edit it; starring a recent directory saves it as a project.
+- The blank screen shows ⌥⌘0 (new project) under the title in faint text, so the shortcut is visible without opening the menu bar.
 - A project = name + server + folder + branch + whether to use a worktree + environment variables. Projects are kept on the server they belong to, so every client (the Mac app, the iPhone) has the same ones and the same stars; a server older than this keeps them on each client only. When editing, pick the folder with the remote directory browser; branches come from the server's git info (branch and worktree are unavailable outside a git repository). "Delete Project" only removes the saved project, not the folder.
 - The new-session dialog can also change the branch and worktree just for this session:
   - With worktree checked: creates a worktree at `<repo>/.claude/worktrees/<name>` on branch `claude/<name>`, branched from the selected branch (same as the Claude desktop app).
@@ -213,6 +214,8 @@ Each session takes a single row; activity descriptions and errors are in the too
 |---|---|
 | ↩ / ⇧↩ or ⌥↩ | Send / new line (while an input method is composing, ↩ still confirms the candidate) |
 | ⌘N | New session |
+| ⌥⌘0 | New project, in the new-session screen |
+| ⌥⌘1…9 | Starred projects, in the new-session screen |
 | ⌘K / ⌘F | Search sessions |
 | ⌘B | Show / hide sidebar |
 | ⌥⌘↑ / ⌥⌘↓ | Previous / next session (↑ / ↓ also work when the sidebar has focus) |
@@ -315,6 +318,7 @@ Development environment variables for the client (for checking the UI without sc
 | `BINARY_SET_LANGUAGE=en\|zh` / `BINARY_TOGGLE_INSPECTOR=1` / `BINARY_MOVE=<id>=<group>` | After launch, switch language / toggle the info panel / move a session into a group |
 | `BINARY_ATTACH=<a.png,b.jpg>` | Put these images in the message box |
 | `BINARY_PROJECT_PICKER=1` / `BINARY_EDIT_PROJECT=new\|current` | With `BINARY_NEW_SESSION`: open the project list / the project editor |
+| `BINARY_PROJECT_SERVER=<n>` | With `BINARY_PROJECT_PICKER`: open on the n-th server's folders |
 | `BINARY_TIMING=1` | Print timings of each stage of opening a session to stderr |
 | `BINARY_SNAPSHOT_MODE=screen` / `composite` | Capture what's actually on screen (works with the split layout too) / composite popovers, sheets and the main window into one image |
 | `BINARY_SEND_TEXT=<text>` | Type this text into the message box and press ↩ |
