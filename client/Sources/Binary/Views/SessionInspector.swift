@@ -3,6 +3,74 @@ import SwiftUI
 import AppKit
 #endif
 
+/// A subagent's own metadata and transcript, rather than its parent's usage.
+struct SubagentInspector: View {
+    let controller: SubagentController
+    @Environment(Navigation.self) private var nav
+    @Environment(\.theme) private var theme
+
+    var body: some View {
+        let info = controller.info
+        let entries = controller.entries
+        let model = entries.last { $0.model != nil && $0.model != "<synthetic>" }?.model
+        let started = entries.first?.time.flatMap(WireDate.parse) ?? info?.startedAt
+        let updated = entries.last?.time.flatMap(WireDate.parse) ?? info?.updatedAt
+        ScrollView {
+            VStack(alignment: .leading, spacing: 12) {
+                InspectorCard(title: tr("Subagent")) {
+                    Text(controller.title)
+                        .font(theme.font(.callout))
+                        .textSelection(.enabled)
+                        .fixedSize(horizontal: false, vertical: true)
+                    InfoRow(icon: "number", label: "ID", value: controller.agentID, mono: true, scrollable: true) {
+                        Button { copy(controller.agentID) } label: { Image(systemName: "doc.on.doc") }
+                            .buttonStyle(.icon(size: 20))
+                            .help(tr("Copy"))
+                    }
+                    if let parent = controller.parent {
+                        Button {
+                            nav.selection = SessionRef(server: controller.conn.id, session: parent.id)
+                        } label: {
+                            Label(parent.title, systemImage: "arrow.turn.left.up")
+                        }
+                        .buttonStyle(.themed(.secondary, compact: true))
+                        .help(tr("Back to Parent Session"))
+                    }
+                }
+                InspectorCard(title: tr("Usage")) {
+                    InfoRow(icon: "text.bubble", label: tr("Messages"),
+                            value: controller.loaded ? "\(entries.count)" : info?.entries.map(String.init) ?? "—")
+                    InfoRow(icon: "cpu", label: tr("Model"),
+                            value: model.map { Format.model($0, info: controller.conn.info) } ?? "—")
+                    if let started {
+                        InfoRow(icon: "calendar", label: tr("Created"),
+                                value: started.formatted(Date.FormatStyle().month().day().hour().minute().locale(Format.locale)))
+                    }
+                    if let updated {
+                        InfoRow(icon: "clock", label: tr("Updated"), value: Format.relative(updated))
+                    }
+                }
+                if let prompt = info?.prompt, !prompt.isEmpty {
+                    InspectorCard(title: tr("Prompt")) {
+                        Text(prompt)
+                            .font(theme.font(.caption))
+                            .foregroundStyle(theme.c.textMuted)
+                            .textSelection(.enabled)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                }
+            }
+            .padding(12)
+            .slimScrollers()
+        }
+        .fillAvailable()
+        .background(theme.c.background)
+        .task(id: "\(controller.sessionID)|\(controller.agentID)") {
+            await controller.conn.loadSubagents(controller.sessionID)
+        }
+    }
+}
+
 /// The right-hand panel: where a session runs, how it is organized, what it
 /// has used, and the sessions and subagents it started.
 struct SessionInspector: View {

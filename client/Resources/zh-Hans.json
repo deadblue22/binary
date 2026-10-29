@@ -404,6 +404,8 @@
  "Updated": "更新",
  "Updating…": "正在更新…",
  "Usage": "用量",
+ "Subagent": "子代理",
+ "Prompt": "提示词",
  "Use": "使用",
  "Use Move to Group on a session (long press) to add it here": "长按 session，用「移到分组」把它放进来",
  "Uses Claude Code's own setting.": "使用 Claude Code 自己的设置。",

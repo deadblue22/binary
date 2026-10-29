@@ -61,7 +61,7 @@ struct DetailColumn: View {
                                                    set: { appearance.showInspector = $0 }),
                               width: InspectorLayout.width(theme)) {
                 if let agent {
-                    SessionInspector(conn: agent.conn, sessionID: agent.sessionID, currentAgent: agent.agentID)
+                    SubagentInspector(controller: agent)
                 } else if let controller {
                     OpenSessionInspector(controller: controller)
                 }
