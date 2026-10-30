@@ -6,11 +6,11 @@ import SwiftUI
 struct ProjectPicker: View {
     let current: StartTarget?
     let onPick: (StartTarget) -> Void
-    let onNew: () -> Void
+    let onNew: (UUID?) -> Void
     let onEdit: (Project) -> Void
     /// The options button on a plain folder: save it as a project with its settings.
     var onEditFolder: ((UUID, String) -> Void)? = nil
-    var onBrowse: (() -> Void)? = nil
+    var onBrowse: ((UUID) -> Void)? = nil
     @Environment(ServerStore.self) private var store
     @Environment(ProjectStore.self) private var projects
     @Environment(\.theme) private var theme
@@ -52,12 +52,12 @@ struct ProjectPicker: View {
                         .foregroundStyle(theme.c.textFaint)
                 }
                 Section {
-                    if let onBrowse {
-                        Button { after(onBrowse) } label: {
+                    if let onBrowse, let server = current?.server ?? store.orderedConnections.first?.id {
+                        Button { after { onBrowse(server) } } label: {
                             Label(tr("Open Folder…"), systemImage: "folder.badge.plus")
                         }
                     }
-                    Button { after(onNew) } label: {
+                    Button { after { onNew(current?.server) } } label: {
                         Label(tr("New Project…"), systemImage: "plus")
                     }
                 }

@@ -57,6 +57,8 @@ targets:
         group: Shared/Views
       - path: ../Sources/Binary/Views/SessionDetailView.swift
         group: Shared/Views
+      - path: ../Sources/Binary/Views/SearchHighlight.swift
+        group: Shared/Views
       - path: ../Sources/Binary/Views/SessionInspector.swift
         group: Shared/Views
       - path: ../Sources/Binary/Views/SlashCommands.swift
