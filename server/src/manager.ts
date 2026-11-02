@@ -862,10 +862,12 @@ export class Manager implements SessionHost, SessionToolHost {
    */
   private async readUsage(): Promise<PlanUsage | undefined> {
     let u: PlanUsage | undefined;
+    // A long-running process can report a plan but no limits; ask the next one then.
+    const settled = (x?: PlanUsage) => !!x && (x.available || !x.plan);
     for (const s of this.sessions.values()) {
-      if (s.live && (u = await s.planUsage())) break;
+      if (s.live && settled((u = await s.planUsage()))) break;
     }
-    if (!u) {
+    if (!settled(u)) {
       const input = { async *[Symbol.asyncIterator]() { await new Promise(() => undefined); } } as AsyncIterable<SDKUserMessage>;
       const q = query({ prompt: input, options: this.probeOptions(homedir()) });
       try {
@@ -877,11 +879,12 @@ export class Manager implements SessionHost, SessionToolHost {
         q.close();
       }
     }
-    if (u) {
+    // Keep a good reading over a half answer.
+    if (u && (settled(u) || !this.usage)) {
       this.usage = u;
       this.broadcastGlobal(event('usage', { usage: u }));
     }
-    return u ?? this.usage;
+    return this.usage ?? u;
   }
 
   /** Parent links from the desktop app's session records. */

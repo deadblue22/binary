@@ -118,6 +118,8 @@ export interface PlanUsage {
   available: boolean;
   windows: { kind: string; percent: number; resetsAt?: string }[];
   at: string;
+  /** The subscription (pro, max, ...); absent when signed in with an API key. */
+  plan?: string;
 }
 
 export interface QueuedMessage {
@@ -625,7 +627,11 @@ export class Session {
     this.tasks.clear();
     this.cancelPending(T('processExited'));
     this.clearPartial();
-    const crashed = !proc.closing && (error !== undefined || (this.state !== 'idle' && this.state !== 'error'));
+    // Between turns nothing is lost: the next message starts a new process.
+    const crashed = !proc.closing && this.state !== 'idle' && this.state !== 'error';
+    if (!proc.closing && !crashed && error !== undefined) {
+      this.host.log(`session ${this.id}: process ended while idle: ${message(error)}`);
+    }
     if (crashed) {
       this.state = 'error';
       const stderr = stderrHint(proc.stderr);
@@ -1118,7 +1124,13 @@ export async function readPlanUsage(q: Query): Promise<PlanUsage | undefined> {
       const resets = w.resets_at ?? w.resetsAt;
       windows.push({ kind, percent: w.utilization, ...(resets && { resetsAt: resets }) });
     }
-    return { available: Boolean(r.rate_limits_available ?? r.rateLimitsAvailable ?? windows.length), windows, at: new Date().toISOString() };
+    const plan = r.subscription_type ?? r.subscriptionType;
+    return {
+      available: Boolean(r.rate_limits_available ?? r.rateLimitsAvailable ?? windows.length),
+      windows,
+      at: new Date().toISOString(),
+      ...(typeof plan === 'string' && plan && { plan }),
+    };
   } catch {
     return undefined;
   }
