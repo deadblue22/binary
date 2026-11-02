@@ -2,13 +2,11 @@ import SwiftUI
 
 // MARK: - Picker
 
-/// Where a new session starts, in two steps: the server first, then that
-/// server's projects and recent folders. Starred projects (⌥⌘1…9) skip the
-/// list, and "New Project…" (⌥⌘0) opens the editor for the server in view.
+/// Projects and recent folders on the server selected in the composer.
 struct ProjectPicker: View {
+    let server: UUID
     let current: StartTarget?
     let onPick: (StartTarget) -> Void
-    /// nil when no server is chosen yet: the editor starts from the default one.
     let onNew: (UUID?) -> Void
     let onEdit: (Project) -> Void
     /// The options button on a plain folder: save it as a project with its settings.
@@ -18,18 +16,11 @@ struct ProjectPicker: View {
     @Environment(ProjectStore.self) private var projects
     @Environment(\.theme) private var theme
     @State private var query = ""
-    /// nil: the server step. Otherwise that server's projects and folders.
-    @State private var server: UUID?
     @State private var recent: [UUID: [String]] = [:]
     @FocusState private var searchFocused: Bool
 
     private var q: String { query.trimmingCharacters(in: .whitespaces).lowercased() }
-    private var conn: ServerConnection? { server.flatMap { store.connection($0) } }
-    private var visibleServers: [ServerConnection] {
-        store.orderedConnections.filter {
-            q.isEmpty || $0.displayName.lowercased().contains(q) || $0.config.url.lowercased().contains(q)
-        }
-    }
+    private var conn: ServerConnection? { store.connection(server) }
 
     private func matches(_ name: String, _ folder: String) -> Bool {
         q.isEmpty || name.lowercased().contains(q) || folder.lowercased().contains(q)
@@ -39,7 +30,7 @@ struct ProjectPicker: View {
         VStack(spacing: 0) {
             HStack(spacing: 6) {
                 Image(systemName: "magnifyingglass").foregroundStyle(theme.c.textFaint)
-                PlainField(placeholder: conn == nil ? tr("Search servers…") : tr("Search projects and folders…"),
+                PlainField(placeholder: tr("Search projects and folders…"),
                            text: $query, focus: $searchFocused)
                     .foregroundStyle(theme.c.text)
             }
@@ -51,8 +42,6 @@ struct ProjectPicker: View {
                 VStack(alignment: .leading, spacing: 0) {
                     if let conn {
                         folders(conn)
-                    } else {
-                        servers
                     }
                 }
                 .padding(.vertical, 4)
@@ -76,56 +65,25 @@ struct ProjectPicker: View {
         .background {
             // ⌥⌘1…9 for starred projects, ⌥⌘0 for a new one, while the list is open.
             ForEach(0..<min(9, projects.favorites.count), id: \.self) { i in
-                Button("") { pick(projects.favorites[i]) }
-                    .keyboardShortcut(KeyEquivalent(Character("\(i + 1)")), modifiers: [.command, .option])
-                    .hidden()
+                if projects.favorites[i].server == server {
+                    Button("") { pick(projects.favorites[i]) }
+                        .keyboardShortcut(KeyEquivalent(Character("\(i + 1)")), modifiers: [.command, .option])
+                        .hidden()
+                }
             }
             Button("") { onNew(conn?.id) }.keyboardShortcut("0", modifiers: [.command, .option]).hidden()
         }
-        .onAppear {
-            searchFocused = true
-            // With one server the server step has nothing to choose.
-            if store.orderedConnections.count == 1 { server = store.orderedConnections.first?.id }
-            // BINARY_PROJECT_SERVER=<n>: open straight on that server's folders.
-            if let n = DebugHooks.env["BINARY_PROJECT_SERVER"].flatMap(Int.init),
-               store.orderedConnections.indices.contains(n) {
-                server = store.orderedConnections[n].id
+        .onAppear { searchFocused = true }
+        .task(id: server) {
+            if let conn, conn.status == .online {
+                recent[server] = (try? await conn.recentDirs()) ?? []
             }
         }
-        .task {
-            for conn in store.orderedConnections where conn.status == .online {
-                recent[conn.id] = (try? await conn.recentDirs()) ?? []
-            }
-        }
-    }
-
-    // MARK: Steps
-
-    /// The server step: which machine the session runs on.
-    private var servers: some View {
-        ForEach(visibleServers) { c in
-            PickerRow(icon: "server.rack",
-                      title: c.displayName,
-                      subtitle: serverSubtitle(c),
-                      checked: current?.server == c.id) {
-                query = ""
-                server = c.id
-            }
-        }
-    }
-
-    private func serverSubtitle(_ c: ServerConnection) -> String {
-        var parts: [String] = []
-        if case .offline = c.status { parts.append(tr("Offline")) }
-        parts.append(tr("\(projects.projects(on: c.id).count) projects"))
-        parts.append(c.config.url)
-        return parts.joined(separator: " · ")
     }
 
     /// The folder step: one server's projects, then folders used recently.
     @ViewBuilder
     private func folders(_ c: ServerConnection) -> some View {
-        backRow(c)
         let all = projects.projects(on: c.id)
         let favs = all.filter { $0.starred && matches($0.name, $0.folder) }
         let rest = all.filter { !$0.starred && matches($0.name, $0.folder) }
@@ -153,28 +111,6 @@ struct ProjectPicker: View {
                 .foregroundStyle(theme.c.textFaint)
                 .padding(12)
         }
-    }
-
-    /// Back to the server step; the server's own projects stay one tap away.
-    private func backRow(_ c: ServerConnection) -> some View {
-        Button {
-            query = ""
-            server = nil
-        } label: {
-            HStack(spacing: 6) {
-                Image(systemName: "chevron.left")
-                    .font(.system(size: theme.size(.small), weight: .semibold))
-                Text(c.displayName).font(theme.font(.small).weight(.medium))
-                Spacer(minLength: 6)
-                Text(tr("All servers")).font(theme.font(.small))
-            }
-            .foregroundStyle(theme.c.textFaint)
-            .padding(.horizontal, 14)
-            .padding(.vertical, 6)
-            .contentShape(Rectangle())
-        }
-        .buttonStyle(.plain)
-        .help(tr("Choose another server"))
     }
 
     /// The ⌥⌘ number a starred project answers to on this Mac, if any.

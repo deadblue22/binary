@@ -38,7 +38,7 @@ struct NewSessionView: View {
         var id: UUID { project.id }
     }
 
-    private var conn: ServerConnection? { target.flatMap { store.connection($0.server) } }
+    private var conn: ServerConnection? { target.flatMap { store.connection($0.server) } ?? store.orderedConnections.first }
     /// The server "Open Folder…" browses: the one picked in the project list,
     /// otherwise the one already in the composer.
     private var browseConnection: ServerConnection? {
@@ -272,6 +272,7 @@ struct NewSessionView: View {
 
     private func controlBar(text showText: Bool) -> some View {
         HStack(spacing: 4) {
+            serverMenu(showText)
             projectButton
             if isRepo { branchMenu(showText) }
             if !group.isEmpty || !(conn.map { org.orderedGroups($0.id, inUse: $0.groupNames) } ?? []).isEmpty {
@@ -284,37 +285,66 @@ struct NewSessionView: View {
         }
     }
 
+    private func serverMenu(_ showText: Bool) -> some View {
+        Menu {
+            ForEach(store.orderedConnections) { c in
+                Button {
+                    guard c.id != conn?.id else { return }
+                    target = StartTarget(server: c.id, folder: "", project: nil)
+                    config = StartConfig()
+                    git = nil
+                    parent = nil
+                    group = ""
+                    error = nil
+                } label: {
+                    if c.id == conn?.id {
+                        Label(c.displayName, systemImage: "checkmark")
+                    } else {
+                        Text(c.displayName)
+                    }
+                }
+            }
+        } label: {
+            ControlLabel(icon: "server.rack", text: conn?.displayName ?? tr("Server"), showText: showText)
+        }
+        .plainMenu()
+        .help(tr("Server"))
+        .accessibilityLabel(tr("Server"))
+    }
+
     private var projectButton: some View {
         Button { picking = true } label: {
             ControlLabel(icon: config.worktree ? "square.stack.3d.up" : (project != nil ? "folder.fill" : "folder"),
-                         text: project?.name ?? (folder.isEmpty ? tr("Choose a project…") : Project.defaultName(for: folder)),
-                         note: store.orderedConnections.count > 1 ? conn?.displayName : nil)
+                         text: project?.name ?? (folder.isEmpty ? tr("Choose a project…") : Project.defaultName(for: folder)))
         }
         .buttonStyle(.plain)
         .help(tr("Project (⌥⌘1…9 for starred ones)"))
+        .disabled(conn == nil)
         .popover(isPresented: $picking, arrowEdge: .bottom) {
-            ProjectPicker(current: target, onPick: { t in
-                picking = false
-                if let p = projects.project(t.project) { choose(p) } else { pickFolder(server: t.server, t.folder) }
-            }, onNew: { server in
-                picking = false
-                newProject(on: server)
-            }, onEdit: { p in
-                picking = false
-                editing = EditRequest(project: p, isNew: false)
-            }, onEditFolder: { server, path in
-                picking = false
-                var p = Project(name: Project.defaultName(for: path), server: server, folder: path)
-                p.startConfig = projects.config(for: StartTarget(server: server, folder: path, project: nil))
-                editing = EditRequest(project: p, isNew: true)
-            }, onBrowse: { server in
-                picking = false
-                browseServer = server
-                browsing = true
-            })
-            .environment(store)
-            .environment(projects)
-            .environment(\.theme, theme)
+            if let conn {
+                ProjectPicker(server: conn.id, current: target, onPick: { t in
+                    picking = false
+                    if let p = projects.project(t.project) { choose(p) } else { pickFolder(server: t.server, t.folder) }
+                }, onNew: { server in
+                    picking = false
+                    newProject(on: server)
+                }, onEdit: { p in
+                    picking = false
+                    editing = EditRequest(project: p, isNew: false)
+                }, onEditFolder: { server, path in
+                    picking = false
+                    var p = Project(name: Project.defaultName(for: path), server: server, folder: path)
+                    p.startConfig = projects.config(for: StartTarget(server: server, folder: path, project: nil))
+                    editing = EditRequest(project: p, isNew: true)
+                }, onBrowse: { server in
+                    picking = false
+                    browseServer = server
+                    browsing = true
+                })
+                .environment(store)
+                .environment(projects)
+                .environment(\.theme, theme)
+            }
         }
     }
 
@@ -454,6 +484,14 @@ struct NewSessionView: View {
         }).first {
             // Nothing started from this client yet: the folder of the latest session.
             pick(server: latest.0, latest.1)
+        }
+        if let n = DebugHooks.env["BINARY_PROJECT_SERVER"].flatMap(Int.init),
+           store.orderedConnections.indices.contains(n) {
+            let server = store.orderedConnections[n].id
+            if target?.server != server {
+                target = StartTarget(server: server, folder: "", project: nil)
+                config = StartConfig()
+            }
         }
         if DebugHooks.env["BINARY_PROJECT_PICKER"] == "1" {
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.8) { picking = true }
