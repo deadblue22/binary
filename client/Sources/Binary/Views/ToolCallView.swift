@@ -22,12 +22,10 @@ struct ToolCallView: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
-            Button {
-                withAnimation(.easeOut(duration: 0.12)) { expanded.toggle() }
-            } label: {
+            Group {
                 if expanded || name == "TodoWrite" { header } else { compactLine }
             }
-            .buttonStyle(.plain)
+            .disclosureTap { withAnimation(.easeOut(duration: 0.12)) { expanded.toggle() } }
             .background(hover && !expanded ? RoundedRectangle(cornerRadius: 6).fill(theme.c.hover.opacity(0.6)) : nil)
             .onHover { hover = $0 }
 

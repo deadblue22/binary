@@ -451,6 +451,18 @@ private func isQuiet(_ item: TranscriptItem) -> Bool {
     }
 }
 
+extension View {
+    /// Opens or closes a transcript row on click. Not a Button: SwiftUI walks
+    /// every focusable view in the window when rows are built or dropped, and
+    /// a button on each tool line made that a visible hitch while scrolling.
+    func disclosureTap(_ action: @escaping () -> Void) -> some View {
+        contentShape(Rectangle())
+            .onTapGesture(perform: action)
+            .accessibilityAddTraits(.isButton)
+            .accessibilityAction(.default, action)
+    }
+}
+
 struct TranscriptRow: View, Equatable {
     let item: TranscriptItem
     let busy: Bool
@@ -567,21 +579,16 @@ struct ThinkingView: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
-            Button {
-                withAnimation(.easeOut(duration: 0.12)) { expanded.toggle() }
-            } label: {
-                HStack(spacing: 6) {
-                    Image(systemName: "sparkle")
-                    Text(tr("Thinking"))
-                    Chevron(expanded: expanded)
-                }
-                .font(theme.font(.caption))
-                .foregroundStyle(theme.c.textFaint)
-                .padding(.horizontal, 6)
-                .padding(.vertical, 3)
-                .contentShape(Rectangle())
+            HStack(spacing: 6) {
+                Image(systemName: "sparkle")
+                Text(tr("Thinking"))
+                Chevron(expanded: expanded)
             }
-            .buttonStyle(.plain)
+            .font(theme.font(.caption))
+            .foregroundStyle(theme.c.textFaint)
+            .padding(.horizontal, 6)
+            .padding(.vertical, 3)
+            .disclosureTap { withAnimation(.easeOut(duration: 0.12)) { expanded.toggle() } }
             if expanded {
                 // Thinking blocks often end with blank lines.
                 SearchText(text.trimmingCharacters(in: .whitespacesAndNewlines))
@@ -703,24 +710,19 @@ struct TaskNotificationRow: View {
         let p = parts
         let tint = isError ? theme.c.danger : (dim ? theme.c.textFaint : theme.c.success)
         VStack(alignment: .leading, spacing: 0) {
-            Button {
-                withAnimation(.easeOut(duration: 0.12)) { expanded.toggle() }
-            } label: {
-                HStack(spacing: 9) {
-                    IconTile(icon: isError ? "exclamationmark.octagon" : (icon ?? "bell"), tint: tint, size: 22 * min(theme.scale, 1.25))
-                    SearchText(p.summary)
-                        .font(theme.font(.callout).weight(dim ? .regular : .medium))
-                        .foregroundStyle(dim ? theme.c.textMuted : theme.c.text)
-                        .lineLimit(p.body.isEmpty ? 2 : 1)
-                        .truncationMode(.tail)
-                    Spacer(minLength: 4)
-                    if !p.body.isEmpty { Chevron(expanded: expanded) }
-                }
-                .padding(.horizontal, 10)
-                .padding(.vertical, 7)
-                .contentShape(Rectangle())
+            HStack(spacing: 9) {
+                IconTile(icon: isError ? "exclamationmark.octagon" : (icon ?? "bell"), tint: tint, size: 22 * min(theme.scale, 1.25))
+                SearchText(p.summary)
+                    .font(theme.font(.callout).weight(dim ? .regular : .medium))
+                    .foregroundStyle(dim ? theme.c.textMuted : theme.c.text)
+                    .lineLimit(p.body.isEmpty ? 2 : 1)
+                    .truncationMode(.tail)
+                Spacer(minLength: 4)
+                if !p.body.isEmpty { Chevron(expanded: expanded) }
             }
-            .buttonStyle(.plain)
+            .padding(.horizontal, 10)
+            .padding(.vertical, 7)
+            .disclosureTap { withAnimation(.easeOut(duration: 0.12)) { expanded.toggle() } }
             .allowsHitTesting(!p.body.isEmpty)
             .background(hover && !expanded && !p.body.isEmpty ? theme.c.hover.opacity(0.6) : .clear)
             .onHover { hover = $0 }
