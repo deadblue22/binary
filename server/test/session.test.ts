@@ -286,9 +286,34 @@ test('images go to Claude and can be fetched back', async () => {
     assert.equal(s.log.entries[0].blocks?.[0].image, key);
     assert.equal(s.image(key)?.mediaType, 'image/png');
     // Unsupported types and oversized images are refused before anything starts.
-    await assert.rejects(h.manager.create({ cwd: h.cwd, prompt: 'x', images: [{ mediaType: 'image/bmp', data: png }] }), /Unsupported image/);
+    await assert.rejects(h.manager.create({ cwd: h.cwd, prompt: 'x', images: [{ mediaType: 'image/bmp', data: png }] }), /Unsupported attachment/);
     const big = Buffer.alloc(6 << 20).toString('base64');
     await assert.rejects(h.manager.create({ cwd: h.cwd, prompt: 'x', images: [{ mediaType: 'image/png', data: big }] }), /Image too large/);
+  } finally {
+    await h.close();
+  }
+});
+
+test('documents (PDF, text) are accepted and shown by name', async () => {
+  const h = await harness();
+  try {
+    const pdf = Buffer.from('%PDF-1.4\n').toString('base64');
+    const txt = Buffer.from('hello').toString('base64');
+    const sum = await h.manager.create({
+      cwd: h.cwd,
+      prompt: 'summarize',
+      images: [{ mediaType: 'application/pdf', data: pdf, name: 'report.pdf' }, { mediaType: 'text/plain', data: txt, name: 'notes.txt' }],
+    });
+    const s = h.manager.session(sum.id)!;
+    await waitFor('turn', () => s.state === 'idle' && s.log.entries.length >= 3);
+    const texts = s.log.entries[0].blocks?.map((b) => b.text);
+    assert.deepEqual(texts, ['📎 report.pdf', '📎 notes.txt', 'summarize']);
+    await assert.rejects(h.manager.create({ cwd: h.cwd, prompt: 'x', images: [{ mediaType: 'application/zip', data: pdf }] }), /Unsupported attachment/);
+    const big = Buffer.alloc(25 << 20).toString('base64');
+    await assert.rejects(
+      h.manager.create({ cwd: h.cwd, prompt: 'x', images: [{ mediaType: 'application/pdf', data: big }, { mediaType: 'application/pdf', data: big }] }),
+      /Attachments too large/,
+    );
   } finally {
     await h.close();
   }

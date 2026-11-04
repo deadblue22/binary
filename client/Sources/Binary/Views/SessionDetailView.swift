@@ -72,7 +72,7 @@ struct SessionDetailView: View {
                 RoundedRectangle(cornerRadius: 14, style: .continuous)
                     .strokeBorder(theme.c.focus, style: StrokeStyle(lineWidth: 2, dash: [6, 4]))
                     .background(theme.c.focus.opacity(0.06))
-                    .overlay(Label(tr("Drop images to attach"), systemImage: "photo.on.rectangle")
+                    .overlay(Label(tr("Drop files to attach"), systemImage: "doc.on.doc")
                         .font(theme.font(.headline))
                         .foregroundStyle(theme.c.focus))
                     .padding(10)

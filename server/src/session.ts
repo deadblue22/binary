@@ -53,15 +53,21 @@ export interface PartialBlock {
   size: number;
 }
 
-/** An image attached to a user message, as base64. */
+/** An image or document (PDF, plain text) attached to a user message, as base64. */
 export interface ImageInput {
   mediaType: string;
   data: string;
+  /** A document's file name, shown to Claude and in the conversation. */
+  name?: string;
 }
 
 export const IMAGE_TYPES = ['image/png', 'image/jpeg', 'image/gif', 'image/webp'];
+export const DOCUMENT_TYPES = ['application/pdf', 'text/plain'];
+// Claude's limits: 20 files per message, 5 MB per image, 32 MB per request.
 const MAX_IMAGES = 20;
 const MAX_IMAGE_MB = 5;
+const MAX_ATTACHMENT_MB = 32;
+const MAX_NAME = 200;
 /** Image data kept per session for clients to display. */
 const IMAGE_CACHE_BYTES = 48 << 20;
 
@@ -70,14 +76,30 @@ export function checkImages(images: unknown): ImageInput[] {
   if (images == null) return [];
   if (!Array.isArray(images)) throw new LocalizedError(T('imageInvalid'));
   if (images.length > MAX_IMAGES) throw new LocalizedError(T('tooManyImages', { max: MAX_IMAGES }));
+  let total = 0;
   return images.map((img: unknown) => {
-    const { mediaType, data } = (img ?? {}) as Partial<ImageInput>;
-    if (typeof mediaType !== 'string' || !IMAGE_TYPES.includes(mediaType) || typeof data !== 'string' || !/^[A-Za-z0-9+/]+=*$/.test(data)) {
+    const { mediaType, data, name } = (img ?? {}) as Partial<ImageInput>;
+    const isImage = typeof mediaType === 'string' && IMAGE_TYPES.includes(mediaType);
+    if (typeof mediaType !== 'string' || !(isImage || DOCUMENT_TYPES.includes(mediaType)) || typeof data !== 'string' || !/^[A-Za-z0-9+/]+=*$/.test(data)) {
       throw new LocalizedError(T('imageInvalid'));
     }
-    if ((data.length * 3) / 4 > MAX_IMAGE_MB << 20) throw new LocalizedError(T('imageTooLarge', { max: MAX_IMAGE_MB }));
-    return { mediaType, data };
+    if (isImage && (data.length * 3) / 4 > MAX_IMAGE_MB << 20) throw new LocalizedError(T('imageTooLarge', { max: MAX_IMAGE_MB }));
+    // The request limit counts the base64 text.
+    total += data.length;
+    if (total > MAX_ATTACHMENT_MB << 20) throw new LocalizedError(T('attachmentsTooLarge', { max: MAX_ATTACHMENT_MB }));
+    return { mediaType, data, ...(!isImage && typeof name === 'string' && name.trim() && { name: name.trim().slice(0, MAX_NAME) }) };
   });
+}
+
+/** The content block Claude gets for an attachment. */
+function attachmentBlock(a: ImageInput) {
+  if (IMAGE_TYPES.includes(a.mediaType)) {
+    return { type: 'image' as const, source: { type: 'base64' as const, media_type: a.mediaType, data: a.data } };
+  }
+  const title = a.name || (a.mediaType === 'application/pdf' ? 'document.pdf' : 'document.txt');
+  return a.mediaType === 'application/pdf'
+    ? { type: 'document' as const, title, source: { type: 'base64' as const, media_type: 'application/pdf' as const, data: a.data } }
+    : { type: 'document' as const, title, source: { type: 'text' as const, media_type: 'text/plain' as const, data: Buffer.from(a.data, 'base64').toString('utf8') } };
 }
 
 export interface SettingsUpdate {
@@ -683,7 +705,7 @@ export class Session {
     this.ownUuids.add(uuid);
     const content = images.length
       ? [
-          ...images.map((img) => ({ type: 'image' as const, source: { type: 'base64' as const, media_type: img.mediaType, data: img.data } })),
+          ...images.map(attachmentBlock),
           ...(text.trim() ? [{ type: 'text' as const, text }] : []),
         ]
       : text;

@@ -74,6 +74,7 @@ type RawBlock = {
   content?: unknown;
   is_error?: boolean;
   source?: { type?: string; media_type?: string; data?: string };
+  title?: string;
 };
 
 type Partialish = Omit<Entry, 'seq' | 'uuid'>;
@@ -207,7 +208,7 @@ function userEntry(m: RawMessage, uuid: string, onImage?: EntryOptions['onImage'
         break;
       }
       case 'document':
-        blocks.push({ type: 'text', text: T('document') });
+        blocks.push({ type: 'text', text: b.title ? `📎 ${b.title}` : T('document') });
         break;
       case 'tool_result': {
         const [text, truncated] = truncate(stripContext(contentText(b.content)).trimEnd(), MAX_TEXT);

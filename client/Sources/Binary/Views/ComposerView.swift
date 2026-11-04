@@ -65,7 +65,7 @@ struct ComposerView: View {
                 AttachmentStrip(images: $images)
             }
             if limitNotice {
-                Text(tr("Up to \(ImageProcessor.maxPerMessage) images per message."))
+                Text(tr("Up to \(ImageProcessor.maxPerMessage) files per message."))
                     .font(theme.font(.caption))
                     .foregroundStyle(theme.c.warning)
             }
@@ -259,7 +259,7 @@ struct ComposerView: View {
                     images = sent
                 }
             } else {
-                switch await controller.send(msg, images: sent.map(\.wire), previews: sent.map(\.thumbnail)) {
+                switch await controller.send(msg, images: sent.map(\.wire), previews: sent.compactMap(\.thumbnail), fileNames: sent.compactMap(\.name)) {
                 case .sent:
                     break
                 case .queued(let id):

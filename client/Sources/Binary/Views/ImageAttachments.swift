@@ -8,22 +8,32 @@ import PhotosUI
 import UIKit
 #endif
 
-/// An image waiting to be sent with a message.
+/// An image or document (PDF, text) waiting to be sent with a message.
 struct PendingImage: Identifiable, Equatable {
     let id = UUID()
     let data: Data
     let mediaType: String
-    let thumbnail: PlatformImage
+    /// Nil for documents.
+    let thumbnail: PlatformImage?
+    /// A document's file name; nil for images.
+    var name: String?
 
-    var wire: WireImage { WireImage(mediaType: mediaType, data: data.base64EncodedString()) }
+    var wire: WireImage { WireImage(mediaType: mediaType, data: data.base64EncodedString(), name: name) }
 
     static func == (a: PendingImage, b: PendingImage) -> Bool { a.id == b.id }
 }
 
 /// Turns pasted, dropped or picked images into what the server accepts:
 /// PNG / JPEG / GIF / WebP, at most 5 MB each, long side at most 2000 px.
+/// PDFs and text files go as they are; all attachments together stay under
+/// Claude's 32 MB request limit (base64 is a third larger).
 enum ImageProcessor {
     static let maxPerMessage = 20
+    static let maxDocumentBytes = 24_000_000
+    /// What the file pickers offer besides images.
+    static let documentTypes: [UTType] = [
+        .pdf, .text, .sourceCode, .json, .xml, .commaSeparatedText, UTType("public.yaml"), UTType("net.daringfireball.markdown"),
+    ].compactMap { $0 }
     static let maxSide = 2000
     static let maxBytes = 5_000_000
     static let jpegAbove = 3_500_000
@@ -52,10 +62,23 @@ enum ImageProcessor {
         return PendingImage(data: encoded, mediaType: mediaType, thumbnail: thumb)
     }
 
+    /// An image, PDF or text file; nil for anything else.
     static func prepare(url: URL) -> PendingImage? {
-        guard let type = UTType(filenameExtension: url.pathExtension), type.conforms(to: .image),
+        guard let type = UTType(filenameExtension: url.pathExtension) else { return nil }
+        // Picked files outside the app's sandbox need this on iOS; elsewhere it is a no-op.
+        let scoped = url.startAccessingSecurityScopedResource()
+        defer { if scoped { url.stopAccessingSecurityScopedResource() } }
+        if type.conforms(to: .image) {
+            return (try? Data(contentsOf: url)).flatMap { prepare($0, type: type) }
+        }
+        let isPDF = type.conforms(to: .pdf)
+        let isText = documentTypes.contains { type.conforms(to: $0) && $0 != .pdf }
+        guard isPDF || isText,
+              let size = (try? url.resourceValues(forKeys: [.fileSizeKey]))?.fileSize, size <= maxDocumentBytes,
               let data = try? Data(contentsOf: url) else { return nil }
-        return prepare(data, type: type)
+        // Text goes as UTF-8; other encodings would reach Claude garbled.
+        if isText, !isPDF, String(data: data, encoding: .utf8) == nil { return nil }
+        return PendingImage(data: data, mediaType: isPDF ? "application/pdf" : "text/plain", thumbnail: nil, name: url.lastPathComponent)
     }
 
     /// PNG or JPEG bytes of a bitmap.
@@ -121,7 +144,7 @@ enum ImageProcessor {
     @MainActor
     static func pick() -> [PendingImage] {
         let panel = NSOpenPanel()
-        panel.allowedContentTypes = [.image]
+        panel.allowedContentTypes = [.image] + documentTypes
         panel.allowsMultipleSelection = true
         panel.canChooseDirectories = false
         panel.prompt = tr("Attach")
@@ -164,16 +187,18 @@ struct AttachButton: View {
                 .frame(width: 26, height: 28)
         }
         .buttonStyle(.icon(size: 26))
-        .help(tr("Attach images (or paste / drop them)"))
-        .accessibilityLabel(tr("Attach Images"))
+        .help(tr("Attach files (or paste / drop them)"))
+        .accessibilityLabel(tr("Attach Files"))
     }
     #else
     @State private var picking = false
+    @State private var pickingFile = false
     @State private var items: [PhotosPickerItem] = []
 
     var body: some View {
         Menu {
             Button { picking = true } label: { Label(tr("Photo Library"), systemImage: "photo.on.rectangle") }
+            Button { pickingFile = true } label: { Label(tr("Files"), systemImage: "doc") }
             Button { add(ImageProcessor.pasteboardImages()) } label: { Label(tr("Paste Image"), systemImage: "doc.on.clipboard") }
         } label: {
             Image(systemName: "plus")
@@ -182,7 +207,14 @@ struct AttachButton: View {
                 .contentShape(Rectangle())
         }
         .buttonStyle(.icon(size: 30))
-        .accessibilityLabel(tr("Attach Images"))
+        .accessibilityLabel(tr("Attach Files"))
+        .fileImporter(isPresented: $pickingFile, allowedContentTypes: [.image] + ImageProcessor.documentTypes, allowsMultipleSelection: true) { result in
+            guard case .success(let urls) = result else { return }
+            Task {
+                let out = await Task.detached { urls.compactMap(ImageProcessor.prepare(url:)) }.value
+                add(out)
+            }
+        }
         .photosPicker(isPresented: $picking, selection: $items, maxSelectionCount: ImageProcessor.maxPerMessage,
                       matching: .images, preferredItemEncoding: .current)
         .onChange(of: items) { _, picked in
@@ -215,10 +247,7 @@ struct AttachmentStrip: View {
         ScrollView(.horizontal) {
             HStack(spacing: 8) {
                 ForEach(images) { img in
-                    Image(platformImage: img.thumbnail)
-                        .resizable()
-                        .aspectRatio(contentMode: .fill)
-                        .frame(width: 64, height: 64)
+                    thumb(img)
                         .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
                         .overlay(RoundedRectangle(cornerRadius: 8, style: .continuous).strokeBorder(theme.c.border))
                         .overlay(alignment: .topTrailing) {
@@ -234,7 +263,7 @@ struct AttachmentStrip: View {
                             .offset(x: 5, y: -5)
                             .help(tr("Remove"))
                         }
-                        .help(img.mediaType + " · " + ByteCountFormatter.string(fromByteCount: Int64(img.data.count), countStyle: .file))
+                        .help((img.name ?? img.mediaType) + " · " + ByteCountFormatter.string(fromByteCount: Int64(img.data.count), countStyle: .file))
                 }
             }
             .padding(.top, 6)
@@ -242,6 +271,31 @@ struct AttachmentStrip: View {
             .slimScrollers()
         }
         .scrollIndicators(.never)
+    }
+
+    /// An image's thumbnail, or a tile with a document's icon and name.
+    @ViewBuilder
+    private func thumb(_ img: PendingImage) -> some View {
+        if let thumbnail = img.thumbnail {
+            Image(platformImage: thumbnail)
+                .resizable()
+                .aspectRatio(contentMode: .fill)
+                .frame(width: 64, height: 64)
+        } else {
+            VStack(spacing: 3) {
+                Image(systemName: img.mediaType == "application/pdf" ? "doc.richtext" : "doc.text")
+                    .font(.system(size: 20))
+                Text(img.name ?? "")
+                    .font(theme.font(.caption))
+                    .lineLimit(2)
+                    .truncationMode(.middle)
+                    .multilineTextAlignment(.center)
+            }
+            .foregroundStyle(theme.c.textMuted)
+            .padding(4)
+            .frame(width: 88, height: 64)
+            .background(theme.c.surfaceAlt)
+        }
     }
 }
 
@@ -304,7 +358,7 @@ final class PasteCatcher {
 #endif
 
 extension View {
-    /// Accepts dropped image files and image data.
+    /// Accepts dropped image, PDF and text files and image data.
     func imageDrop(isTargeted: Binding<Bool>, add: @escaping @MainActor ([PendingImage]) -> Void) -> some View {
         onDrop(of: [.fileURL, .image], isTargeted: isTargeted) { providers in
             ImageProcessor.load(providers, into: add)

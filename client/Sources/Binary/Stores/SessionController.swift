@@ -299,10 +299,12 @@ final class SessionController {
     }
 
     /// Shows the message in the transcript right away (`previews` are its
-    /// images), marked sent once the server has it.
-    func send(_ text: String, images: [WireImage] = [], previews: [PlatformImage] = []) async -> SendResult {
+    /// images, `fileNames` its documents), marked sent once the server has it.
+    func send(_ text: String, images: [WireImage] = [], previews: [PlatformImage] = [], fileNames: [String] = []) async -> SendResult {
         let before = Set(items.compactMap { if case .user = $0.kind { $0.id } else { nil } })
-        let msg = OutgoingMessage(text: text.trimmingCharacters(in: .whitespacesAndNewlines), images: previews, before: before)
+        // Documents show as "📎 name" lines above the text, as the server's copy does.
+        let shown = (fileNames.map { "📎 \($0)" } + [text.trimmingCharacters(in: .whitespacesAndNewlines)]).filter { !$0.isEmpty }.joined(separator: "\n\n")
+        let msg = OutgoingMessage(text: shown, images: previews, before: before)
         outgoing.append(msg)
         let result = await post(text, images: images)
         if result == .sent {

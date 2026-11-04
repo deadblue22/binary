@@ -84,8 +84,9 @@ const CATALOG = {
   envInvalid: 'Invalid environment variable: {name}',
   layoutInvalid: '{field} must be a list of names',
   imageNotFound: 'Image not found or no longer cached',
-  imageInvalid: 'Unsupported image (PNG, JPEG, GIF or WebP as base64)',
+  imageInvalid: 'Unsupported attachment (PNG, JPEG, GIF, WebP, PDF or plain text, as base64)',
   imageTooLarge: 'Image too large (at most {max} MB each)',
+  attachmentsTooLarge: 'Attachments too large (at most {max} MB in total)',
   tooManyImages: 'Too many images (at most {max} per message)',
   // replies to Claude for permission requests Binary closes itself
   deniedInBinary: 'The user denied this action in Binary',

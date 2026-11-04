@@ -421,10 +421,12 @@ struct CreateSessionRequest: Encodable {
     var images: [WireImage]?
 }
 
-/// An image sent with a message (base64 in JSON).
+/// An image or document sent with a message (base64 in JSON).
 struct WireImage: Encodable, Sendable {
     var mediaType: String
     var data: String
+    /// A document's file name.
+    var name: String?
 }
 
 /// GET /fs/git?path=…
