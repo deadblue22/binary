@@ -500,6 +500,8 @@ struct TableTranscript: NSViewRepresentable {
 /// Glides a mouse wheel's steps instead of jumping by them; trackpads and
 /// other precise devices scroll as the system does.
 final class TranscriptScrollView: NSScrollView {
+    /// Steps are this many times AppKit's.
+    static let stepScale: CGFloat = 2.5
     /// Where the glide in progress ends.
     private var target: NSPoint?
     private var glide = 0
@@ -511,9 +513,10 @@ final class TranscriptScrollView: NSScrollView {
             return super.scrollWheel(with: event)
         }
         let clip = contentView
-        // A step as AppKit takes it: the wheel's lines (accelerated by the
-        // system) times the line height, from where the glide is heading.
-        let step = event.scrollingDeltaY * max(verticalLineScroll, 1)
+        // The wheel's lines (accelerated by the system) times a line height,
+        // from where the glide is heading. AppKit's own line (24 pt) moved a
+        // long transcript too little per step.
+        let step = event.scrollingDeltaY * max(verticalLineScroll, 1) * Self.stepScale
         var to = target ?? clip.bounds.origin
         to.y += doc.isFlipped ? -step : step
         to.y = min(max(to.y, 0), max(0, doc.frame.height - clip.bounds.height))
@@ -522,7 +525,7 @@ final class TranscriptScrollView: NSScrollView {
         glide += 1
         let current = glide
         NSAnimationContext.runAnimationGroup { ctx in
-            ctx.duration = 0.18
+            ctx.duration = 0.2
             ctx.timingFunction = CAMediaTimingFunction(name: .easeOut)
             clip.animator().setBoundsOrigin(to)
         } completionHandler: { [weak self] in
