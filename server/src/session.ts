@@ -3,6 +3,7 @@
 // Agent SDK: query() for live sessions, getSessionMessages()/getSessionInfo()
 // for stored transcripts.
 
+import { DOCX_TYPE, docxText } from './docx.js';
 import { randomUUID } from 'node:crypto';
 import {
   query,
@@ -53,7 +54,7 @@ export interface PartialBlock {
   size: number;
 }
 
-/** An image or document (PDF, plain text) attached to a user message, as base64. */
+/** An image or document (PDF, plain text, Word) attached to a user message, as base64. */
 export interface ImageInput {
   mediaType: string;
   data: string;
@@ -62,7 +63,7 @@ export interface ImageInput {
 }
 
 export const IMAGE_TYPES = ['image/png', 'image/jpeg', 'image/gif', 'image/webp'];
-export const DOCUMENT_TYPES = ['application/pdf', 'text/plain'];
+export const DOCUMENT_TYPES = ['application/pdf', 'text/plain', DOCX_TYPE];
 // Claude's limits: 20 files per message, 5 MB per image, 32 MB per request.
 const MAX_IMAGES = 20;
 const MAX_IMAGE_MB = 5;
@@ -87,7 +88,18 @@ export function checkImages(images: unknown): ImageInput[] {
     // The request limit counts the base64 text.
     total += data.length;
     if (total > MAX_ATTACHMENT_MB << 20) throw new LocalizedError(T('attachmentsTooLarge', { max: MAX_ATTACHMENT_MB }));
-    return { mediaType, data, ...(!isImage && typeof name === 'string' && name.trim() && { name: name.trim().slice(0, MAX_NAME) }) };
+    const docName = !isImage && typeof name === 'string' && name.trim() ? { name: name.trim().slice(0, MAX_NAME) } : {};
+    if (mediaType === DOCX_TYPE) {
+      // Claude can't read Word files: it gets the text.
+      let text: string;
+      try {
+        text = docxText(Buffer.from(data, 'base64'));
+      } catch {
+        throw new LocalizedError(T('imageInvalid'));
+      }
+      return { mediaType: 'text/plain', data: Buffer.from(text, 'utf8').toString('base64'), ...docName };
+    }
+    return { mediaType, data, ...docName };
   });
 }
 

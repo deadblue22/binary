@@ -32,8 +32,10 @@ enum ImageProcessor {
     static let maxDocumentBytes = 24_000_000
     /// What the file pickers offer besides images.
     static let documentTypes: [UTType] = [
-        .pdf, .text, .sourceCode, .json, .xml, .commaSeparatedText, UTType("public.yaml"), UTType("net.daringfireball.markdown"),
+        .pdf, .text, .sourceCode, .json, .xml, .commaSeparatedText, UTType("public.yaml"), UTType("net.daringfireball.markdown"), docx,
     ].compactMap { $0 }
+    static let docx = UTType("org.openxmlformats.wordprocessingml.document")
+    static let docxMediaType = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
     static let maxSide = 2000
     static let maxBytes = 5_000_000
     static let jpegAbove = 3_500_000
@@ -72,13 +74,16 @@ enum ImageProcessor {
             return (try? Data(contentsOf: url)).flatMap { prepare($0, type: type) }
         }
         let isPDF = type.conforms(to: .pdf)
-        let isText = documentTypes.contains { type.conforms(to: $0) && $0 != .pdf }
-        guard isPDF || isText,
+        let isDocx = docx.map { type.conforms(to: $0) } ?? false
+        let isText = !isDocx && documentTypes.contains { type.conforms(to: $0) && $0 != .pdf }
+        guard isPDF || isText || isDocx,
               let size = (try? url.resourceValues(forKeys: [.fileSizeKey]))?.fileSize, size <= maxDocumentBytes,
               let data = try? Data(contentsOf: url) else { return nil }
         // Text goes as UTF-8; other encodings would reach Claude garbled.
         if isText, !isPDF, String(data: data, encoding: .utf8) == nil { return nil }
-        return PendingImage(data: data, mediaType: isPDF ? "application/pdf" : "text/plain", thumbnail: nil, name: url.lastPathComponent)
+        // The server reads a Word file's text.
+        let mediaType = isPDF ? "application/pdf" : isDocx ? docxMediaType : "text/plain"
+        return PendingImage(data: data, mediaType: mediaType, thumbnail: nil, name: url.lastPathComponent)
     }
 
     /// PNG or JPEG bytes of a bitmap.

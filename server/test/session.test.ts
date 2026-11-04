@@ -4,6 +4,8 @@ import { appendFileSync, mkdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { test } from 'node:test';
+import { deflateRawSync } from 'node:zlib';
+import { DOCX_TYPE, docxText } from '../src/docx.js';
 type Ev = { type: string; data: string };
 const collect = (events: Ev[]) => (type: string, data: string) => (events.push({ type, data }), true);
 import { harness, hasFlag, transcriptLine, waitFor, writeTranscript } from './helpers.js';
@@ -294,7 +296,29 @@ test('images go to Claude and can be fetched back', async () => {
   }
 });
 
-test('documents (PDF, text) are accepted and shown by name', async () => {
+/** A one-file ZIP (deflated). */
+function zipOf(name: string, content: string): Buffer {
+  const data = deflateRawSync(Buffer.from(content));
+  const n = Buffer.from(name);
+  const local = Buffer.alloc(30);
+  local.writeUInt32LE(0x04034b50, 0);
+  local.writeUInt16LE(8, 8);
+  local.writeUInt32LE(data.length, 18);
+  local.writeUInt16LE(n.length, 26);
+  const central = Buffer.alloc(46);
+  central.writeUInt32LE(0x02014b50, 0);
+  central.writeUInt16LE(8, 10);
+  central.writeUInt32LE(data.length, 20);
+  central.writeUInt16LE(n.length, 28);
+  const eocd = Buffer.alloc(22);
+  eocd.writeUInt32LE(0x06054b50, 0);
+  eocd.writeUInt16LE(1, 10);
+  eocd.writeUInt32LE(46 + n.length, 12);
+  eocd.writeUInt32LE(30 + n.length + data.length, 16);
+  return Buffer.concat([local, n, data, central, n, eocd]);
+}
+
+test('documents (PDF, text, Word) are accepted and shown by name', async () => {
   const h = await harness();
   try {
     const pdf = Buffer.from('%PDF-1.4\n').toString('base64');
@@ -302,13 +326,21 @@ test('documents (PDF, text) are accepted and shown by name', async () => {
     const sum = await h.manager.create({
       cwd: h.cwd,
       prompt: 'summarize',
-      images: [{ mediaType: 'application/pdf', data: pdf, name: 'report.pdf' }, { mediaType: 'text/plain', data: txt, name: 'notes.txt' }],
+      images: [
+        { mediaType: 'application/pdf', data: pdf, name: 'report.pdf' },
+        { mediaType: 'text/plain', data: txt, name: 'notes.txt' },
+        { mediaType: DOCX_TYPE, data: zipOf('word/document.xml', '<w:p><w:r><w:t>hi</w:t></w:r></w:p>').toString('base64'), name: 'spec.docx' },
+      ],
     });
     const s = h.manager.session(sum.id)!;
     await waitFor('turn', () => s.state === 'idle' && s.log.entries.length >= 3);
     const texts = s.log.entries[0].blocks?.map((b) => b.text);
-    assert.deepEqual(texts, ['📎 report.pdf', '📎 notes.txt', 'summarize']);
+    assert.deepEqual(texts, ['📎 report.pdf', '📎 notes.txt', '📎 spec.docx', 'summarize']);
     await assert.rejects(h.manager.create({ cwd: h.cwd, prompt: 'x', images: [{ mediaType: 'application/zip', data: pdf }] }), /Unsupported attachment/);
+    // Word files reach Claude as text; broken ones are refused.
+    const docx = zipOf('word/document.xml', '<w:p><w:r><w:t>Hello &amp; bye</w:t></w:r></w:p><w:p><w:r><w:t>Line 2</w:t></w:r></w:p>');
+    assert.equal(docxText(docx), 'Hello & bye\nLine 2');
+    await assert.rejects(h.manager.create({ cwd: h.cwd, prompt: 'x', images: [{ mediaType: DOCX_TYPE, data: pdf }] }), /Unsupported attachment/);
     const big = Buffer.alloc(25 << 20).toString('base64');
     await assert.rejects(
       h.manager.create({ cwd: h.cwd, prompt: 'x', images: [{ mediaType: 'application/pdf', data: big }, { mediaType: 'application/pdf', data: big }] }),

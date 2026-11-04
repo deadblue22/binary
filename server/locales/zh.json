@@ -68,7 +68,7 @@
  "envInvalid": "环境变量不合法: {name}",
  "layoutInvalid": "{field} 必须是名称列表",
  "imageNotFound": "图片不存在或已过期",
- "imageInvalid": "不支持的附件（支持 PNG、JPEG、GIF、WebP、PDF、纯文本，base64 编码）",
+ "imageInvalid": "不支持的附件（支持 PNG、JPEG、GIF、WebP、PDF、Word（.docx）、纯文本，base64 编码）",
  "imageTooLarge": "图片过大（单张不超过 {max} MB）",
  "attachmentsTooLarge": "附件总大小过大（合计最多 {max} MB）",
  "tooManyImages": "图片过多（每条消息最多 {max} 张）",
