@@ -17,8 +17,12 @@ struct NewSessionView: View {
     @State private var git: GitInfo?
     @State private var parent: SessionRef?
     @State private var group = ""
-    @State private var text = ""
-    @State private var images: [PendingImage] = []
+    @Bindable private var drafts = ComposerDrafts.shared
+    private var text: String { drafts.newSessionText }
+    private var images: [PendingImage] {
+        get { drafts.newSessionImages }
+        nonmutating set { drafts.newSessionImages = newValue }
+    }
     @State private var creating = false
     @State private var error: String?
     @State private var picking = false
@@ -192,7 +196,7 @@ struct NewSessionView: View {
                     .lineLimit(4)
                     .textSelection(.enabled)
             }
-            if !images.isEmpty { AttachmentStrip(images: $images) }
+            if !images.isEmpty { AttachmentStrip(images: $drafts.newSessionImages) }
             HStack(alignment: .bottom, spacing: 8) {
                 AttachButton { add($0) }
                 ZStack(alignment: .topLeading) {
@@ -203,7 +207,7 @@ struct NewSessionView: View {
                             .allowsHitTesting(false)
                             .accessibilityHidden(true)
                     }
-                    TextField("", text: $text, axis: .vertical)
+                    TextField("", text: $drafts.newSessionText, axis: .vertical)
                         .textFieldStyle(.plain)
                         .font(theme.font(.body))
                         .foregroundStyle(theme.c.text)
@@ -239,7 +243,7 @@ struct NewSessionView: View {
             .shadow(color: theme.c.shadow, radius: focused ? 8 : 4, y: 2)
             .contentShape(shape)
             .onTapGesture { focused = true }
-            .slashCommands(text: $text, focused: focused, conn: conn, cwd: folder.isEmpty ? nil : folder)
+            .slashCommands(text: $drafts.newSessionText, focused: focused, conn: conn, cwd: folder.isEmpty ? nil : folder)
             controls
                 .padding(.horizontal, 4)
         }
@@ -568,11 +572,16 @@ struct NewSessionView: View {
             images: images.isEmpty ? nil : images.map(\.wire)
         )
         let group = group
+        let sentText = text
+        let sentImages = images
         Task {
             do {
                 let s = try await conn.create(req)
                 if !group.isEmpty { org.addGroup(conn.id, group) }
                 projects.remember(target, used)
+                // Keep edits made while the creation request was in flight.
+                if drafts.newSessionText == sentText { drafts.newSessionText = "" }
+                if drafts.newSessionImages == sentImages { drafts.newSessionImages = [] }
                 nav.selection = SessionRef(server: conn.id, session: s.id)
             } catch {
                 self.error = error.localizedDescription
