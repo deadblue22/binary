@@ -20,7 +20,8 @@ import AppKit
 ///   BINARY_ACTIVATE=1              bring the app to the front after launch (for UI tests)
 ///   BINARY_CLICKS=<x,y|x,y|…>      after 5 s (BINARY_CLICKS_DELAY), click these points of the main
 ///                                  window (points from its top left), 0.5 s apart; "s:dy" scrolls
-///                                  the transcript dy points toward its start instead
+///                                  the transcript dy points toward its start instead, "w:n" turns
+///                                  a mouse wheel n notches over it
 ///   BINARY_SETTINGS=1              open the settings window (rendered too)
 ///   BINARY_FLAT=1                  sidebar without split-view vibrancy
 ///   BINARY_SCROLL_TOP=1            open transcripts at the top
@@ -169,6 +170,26 @@ enum DebugHooks {
         var delay = 0.0
         for step in steps.split(separator: "|").map(String.init) {
             DispatchQueue.main.asyncAfter(deadline: .now() + delay) {
+                if step.hasPrefix("w:"), let notches = Int32(step.dropFirst(2)) {
+                    // A mouse wheel turned by this many notches over the transcript.
+                    func scrollViews(_ v: NSView) -> [NSScrollView] {
+                        ((v as? NSScrollView).map { [$0] } ?? []) + v.subviews.flatMap(scrollViews)
+                    }
+                    guard let root = w.contentView, let sv = scrollViews(root).first(where: { $0.documentView is TranscriptTableView }),
+                          let e = CGEvent(scrollWheelEvent2Source: nil, units: .line, wheelCount: 1, wheel1: notches, wheel2: 0, wheel3: 0),
+                          let ns = NSEvent(cgEvent: e) else { return }
+                    let before = sv.contentView.bounds.minY
+                    sv.scrollWheel(with: ns)
+                    let after = sv.contentView.bounds.minY
+                    var path: [Int] = []
+                    for i in 1...6 {
+                        DispatchQueue.main.asyncAfter(deadline: .now() + 0.05 * Double(i)) {
+                            path.append(Int(sv.contentView.bounds.minY))
+                            if i == 6 { log("wheel \(notches): \(Int(before)) -> \(Int(after)) -> \(path)") }
+                        }
+                    }
+                    return
+                }
                 if step.hasPrefix("s:"), let dy = Double(step.dropFirst(2)) {
                     // The transcript (else the tallest scroll view), moved by dy toward its start.
                     func scrollViews(_ v: NSView) -> [NSScrollView] {

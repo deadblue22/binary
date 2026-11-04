@@ -100,7 +100,7 @@ struct TableTranscript: NSViewRepresentable {
         column.resizingMask = .autoresizingMask
         table.addTableColumn(column)
 
-        let scroll = NSScrollView()
+        let scroll = TranscriptScrollView()
         scroll.documentView = table
         scroll.hasVerticalScroller = true
         scroll.autohidesScrollers = true
@@ -327,6 +327,7 @@ struct TableTranscript: NSViewRepresentable {
 
         private func scroll(toY y: CGFloat) {
             guard let scroll = table?.enclosingScrollView else { return }
+            (scroll as? TranscriptScrollView)?.stopGliding()
             scroll.contentView.scroll(to: NSPoint(x: 0, y: y))
             scroll.reflectScrolledClipView(scroll.contentView)
         }
@@ -368,8 +369,10 @@ struct TableTranscript: NSViewRepresentable {
             if let line = nativeLine(shown) {
                 return shown.top + shown.bottom + line.height(theme: environment.theme)
             }
-            if let h = heights[shown.row.id], h.key == key(shown) { return h.height }
-            return estimate(shown)
+            // A row whose content changed keeps its last height until it is
+            // measured again: a streaming row's guessed height made everything
+            // above it jump by a few points on each update.
+            return heights[shown.row.id]?.height ?? estimate(shown)
         }
 
         func tableView(_ tableView: NSTableView, viewFor tableColumn: NSTableColumn?, row: Int) -> NSView? {
@@ -490,6 +493,57 @@ struct TableTranscript: NSViewRepresentable {
             case .empty: return base + 140
             default: return base + 30
             }
+        }
+    }
+}
+
+/// Glides a mouse wheel's steps instead of jumping by them; trackpads and
+/// other precise devices scroll as the system does.
+final class TranscriptScrollView: NSScrollView {
+    /// Where the glide in progress ends.
+    private var target: NSPoint?
+    private var glide = 0
+
+    override func scrollWheel(with event: NSEvent) {
+        guard !event.hasPreciseScrollingDeltas, event.phase.isEmpty, event.momentumPhase.isEmpty,
+              event.scrollingDeltaY != 0, let doc = documentView else {
+            stopGliding()
+            return super.scrollWheel(with: event)
+        }
+        let clip = contentView
+        // A step as AppKit takes it: the wheel's lines (accelerated by the
+        // system) times the line height, from where the glide is heading.
+        let step = event.scrollingDeltaY * max(verticalLineScroll, 1)
+        var to = target ?? clip.bounds.origin
+        to.y += doc.isFlipped ? -step : step
+        to.y = min(max(to.y, 0), max(0, doc.frame.height - clip.bounds.height))
+        guard to != clip.bounds.origin else { return }
+        target = to
+        glide += 1
+        let current = glide
+        NSAnimationContext.runAnimationGroup { ctx in
+            ctx.duration = 0.18
+            ctx.timingFunction = CAMediaTimingFunction(name: .easeOut)
+            clip.animator().setBoundsOrigin(to)
+        } completionHandler: { [weak self] in
+            MainActor.assumeIsolated {
+                guard let self, self.glide == current else { return }
+                self.target = nil
+                self.reflectScrolledClipView(clip)
+            }
+        }
+    }
+
+    /// Ends a glide where it is, for a scroll that sets the position directly.
+    func stopGliding() {
+        guard target != nil else { return }
+        target = nil
+        glide += 1
+        let clip = contentView
+        let here = clip.bounds.origin
+        NSAnimationContext.runAnimationGroup { ctx in
+            ctx.duration = 0
+            clip.animator().setBoundsOrigin(here)
         }
     }
 }
