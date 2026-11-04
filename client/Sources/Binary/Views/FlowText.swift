@@ -244,8 +244,28 @@ struct FlowText: NSViewRepresentable {
 }
 
 final class FlowTextView: NSTextView {
+    private var leaving = false
+
     // Let the transcript scroll when the wheel is over the text.
     override func scrollWheel(with event: NSEvent) { nextResponder?.scrollWheel(with: event) }
+
+    // Moving in or out of the window asks for a redraw, which lays out all of
+    // the text first; out of the window there is nothing to draw. Rows built
+    // and dropped while scrolling paid for that each time.
+    override func setNeedsDisplay(_ rect: NSRect, avoidAdditionalLayout flag: Bool) {
+        if window == nil || leaving { return }
+        super.setNeedsDisplay(rect, avoidAdditionalLayout: flag)
+    }
+
+    override func viewWillMove(toWindow newWindow: NSWindow?) {
+        leaving = newWindow == nil
+        super.viewWillMove(toWindow: newWindow)
+    }
+
+    override func viewDidMoveToWindow() {
+        super.viewDidMoveToWindow()
+        leaving = false
+    }
 }
 #else
 /// Selectable, non-editable rich text sized to its content.

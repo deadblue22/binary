@@ -8,6 +8,7 @@ struct ToolCallView: View {
     let cwd: String?
     @Environment(\.theme) private var theme
     @Environment(\.subagentOpener) private var opener
+    @Environment(\.searchHighlight) private var highlight
     @RowExpanded private var expanded = DebugHooks.expandTools
     @State private var hover = false
 
@@ -74,18 +75,15 @@ struct ToolCallView: View {
     }
 
     /// Collapsed: one quiet line, so the text around it reads as the conversation.
+    /// Kept to few views: a long run of tool calls builds dozens of these at
+    /// once while scrolling.
     private var compactLine: some View {
         HStack(spacing: 6) {
             Image(systemName: ToolInfo.icon(name))
                 .font(.system(size: theme.size(.caption) - 1))
                 .foregroundStyle(ToolInfo.tint(name, theme).opacity(0.8))
                 .frame(width: 14)
-            SearchText(ToolInfo.title(name))
-                .font(theme.font(.caption).weight(.medium))
-                .foregroundStyle(theme.c.textMuted)
-            SearchText(ToolInfo.summary(name, input, cwd: cwd))
-                .font(ToolInfo.monoSummary(name) ? theme.mono(theme.size(.caption) - 0.5) : theme.font(.caption))
-                .foregroundStyle(theme.c.textFaint)
+            Text(highlight.apply(compactText))
                 .lineLimit(1)
                 .truncationMode(.middle)
             Spacer(minLength: 4)
@@ -94,7 +92,20 @@ struct ToolCallView: View {
         }
         .padding(.horizontal, 6)
         .padding(.vertical, Self.lineInset)
-        .contentShape(Rectangle())
+    }
+
+    /// The title and summary of a collapsed line as one text.
+    private var compactText: AttributedString {
+        var title = AttributedString(ToolInfo.title(name) + "  ")
+        title.font = theme.font(.caption).weight(.medium)
+        title.foregroundColor = theme.c.textMuted
+        // Long commands are cut in the middle anyway; laying out all of one costs more.
+        var text = ToolInfo.summary(name, input, cwd: cwd)
+        if text.count > 400 { text = text.prefix(200) + "…" + text.suffix(200) }
+        var summary = AttributedString(text)
+        summary.font = ToolInfo.monoSummary(name) ? theme.mono(theme.size(.caption) - 0.5) : theme.font(.caption)
+        summary.foregroundColor = theme.c.textFaint
+        return title + summary
     }
 
     private var subagentRef: SessionRef? {
