@@ -36,6 +36,9 @@ struct TranscriptView<Source: TranscriptSource>: View {
     @State private var highlighted: String?
     /// Earlier rows are being added: keep the distance to the end, not to the top.
     @State private var holdingEnd = false
+    #if os(macOS)
+    @State private var table = TableTranscriptModel()
+    #endif
 
     init(source: Source, jump: TranscriptJump? = nil, onJumped: @escaping () -> Void = {}) {
         self.source = source
@@ -81,8 +84,116 @@ struct TranscriptView<Source: TranscriptSource>: View {
     }
 
     var body: some View {
+        #if os(macOS)
+        tableTranscript
+            .safeAreaInset(edge: .top, spacing: 0) {
+                if searching { searchBar }
+            }
+            .onChange(of: nav.transcriptSearchRequest) { _, _ in
+                searching = true
+                searchFocused = true
+            }
+            .task(id: [searching ? query : "", String(searchOptions.tools), String(searchOptions.thinking)]) { await find() }
+            .onChange(of: source.items) { _, _ in
+                if searching { updateMatches() }
+            }
+        #else
+        scrollTranscript
+        #endif
+    }
+
+    #if os(macOS)
+    /// The rows of the table: the transcript with what is loading above it and
+    /// what is on its way below it.
+    private var tableRows: [TableRow] {
         let busy = source.transcriptBusy
-        GeometryReader { geo in
+        var rows: [TableRow] = []
+        if source.hasMore { rows.append(.loading) }
+        if source.items.isEmpty && source.partial == nil && !busy { rows.append(.empty) }
+        rows += source.items.map(TableRow.item)
+        rows += source.outgoing.map { .outgoing(id: $0.id, text: $0.text, sent: $0.sent) }
+        if let p = source.partial {
+            rows.append(.partial(p))
+        } else if busy, let text = source.activityText {
+            rows.append(.activity(text: text, waiting: source.waitingForApproval))
+        }
+        return rows
+    }
+
+    private var tableTranscript: some View {
+        let marks = TableMarks(query: searching ? query : "", matches: searching ? Set(matches) : [],
+                               selected: searching ? selectedMatch : nil, flash: highlighted)
+        return TableTranscript(rows: tableRows,
+                               outgoingImages: Dictionary(source.outgoing.map { ($0.id, $0.images) }, uniquingKeysWith: { a, _ in a }),
+                               busy: source.transcriptBusy, cwd: source.cwd, marks: marks, expansion: expansion,
+                               model: table, onNearTop: { loadEarlier() })
+            .background(theme.c.background)
+            .overlay(alignment: .bottomTrailing) {
+                if !table.atBottom {
+                    Button { table.scrollToBottom() } label: {
+                        Label(tr("Latest"), systemImage: "arrow.down")
+                    }
+                    .buttonStyle(.themed(.secondary, compact: true))
+                    .padding(14)
+                    .transition(.opacity)
+                }
+            }
+            .task(id: jump?.serial) {
+                guard let jump else { return }
+                await reveal(jump.uuid)
+                if !Task.isCancelled { onJumped() }
+            }
+            .task(id: selectedMatch) {
+                guard searching, let selectedMatch else { return }
+                expansion.open[selectedMatch] = true
+                await reveal(selectedMatch)
+            }
+            .task {
+                guard let pages = Int(DebugHooks.env["BINARY_SCROLL_BENCH"] ?? "") else { return }
+                try? await Task.sleep(nanoseconds: 2_500_000_000)
+                for _ in 0..<pages { await source.loadOlder() }
+                DebugHooks.err("bench: \(source.items.count) rows")
+                try? await Task.sleep(nanoseconds: 3_000_000_000)
+                DebugHooks.scrollBench()
+            }
+    }
+
+    /// Fetches older entries; the table keeps the rows in view where they are.
+    private func loadEarlier() {
+        guard source.hasMore, !source.loadingOlder else { return }
+        Task { await source.loadOlder() }
+    }
+
+    /// Scrolls to the first row of entry `uuid`, loading older pages until
+    /// it's there, and marks it.
+    private func reveal(_ uuid: String) async {
+        func sleep(_ ms: UInt64) async { try? await Task.sleep(nanoseconds: ms * 1_000_000) }
+        var pages = 0
+        while !Task.isCancelled {
+            if let row = source.items.first(where: { $0.id == uuid || $0.id.hasPrefix(uuid + "-") })?.id {
+                // Let the table take the rows just loaded.
+                await sleep(50)
+                guard !Task.isCancelled, table.reveal(row) else { return }
+                withAnimation(.easeOut(duration: 0.2)) { highlighted = row }
+                await sleep(1800)
+                withAnimation(.easeOut(duration: 0.6)) { if highlighted == row { highlighted = nil } }
+                return
+            }
+            if source.loadingOlder {
+                await sleep(100)
+            } else if source.hasMore && pages < 40 {
+                pages += 1
+                await source.loadOlder()
+            } else {
+                return
+            }
+        }
+    }
+    #endif
+
+    private var scrollTranscript: some View {
+        let busy = source.transcriptBusy
+        return GeometryReader { geo in
             ScrollViewReader { proxy in
                 ScrollView {
                     // A plain stack: only the latest rows are rendered (TranscriptWindow),
@@ -222,32 +333,8 @@ struct TranscriptView<Source: TranscriptSource>: View {
                     measuredFor = key
                     measureGeneration += 1
                 }
-                #if os(macOS)
-                .task {
-                    guard let pages = Int(DebugHooks.env["BINARY_SCROLL_BENCH"] ?? "") else { return }
-                    try? await Task.sleep(nanoseconds: 2_500_000_000)
-                    for _ in 0..<pages { await source.loadOlder() }
-                    window = source.items.count
-                    DebugHooks.err("bench: \(source.items.count) rows")
-                    try? await Task.sleep(nanoseconds: 3_000_000_000)
-                    DebugHooks.scrollBench()
-                }
-                #endif
             }
         }
-        #if os(macOS)
-        .safeAreaInset(edge: .top, spacing: 0) {
-            if searching { searchBar }
-        }
-        .onChange(of: nav.transcriptSearchRequest) { _, _ in
-            searching = true
-            searchFocused = true
-        }
-        .task(id: [searching ? query : "", String(searchOptions.tools), String(searchOptions.thinking)]) { await find() }
-        .onChange(of: source.items) { _, _ in
-            if searching { updateMatches() }
-        }
-        #endif
     }
 
     #if os(macOS)
@@ -325,6 +412,9 @@ struct TranscriptView<Source: TranscriptSource>: View {
         guard !Task.isCancelled else { return }
         finding = true
         atBottom = false
+        #if os(macOS)
+        table.atBottom = false
+        #endif
         defer { if !Task.isCancelled { finding = false } }
         while source.hasMore && !Task.isCancelled {
             if source.loadingOlder {
@@ -444,7 +534,7 @@ enum TranscriptWindow {
 
 /// Collapsed tool calls and thinking are one quiet line each; runs of them sit
 /// close together so the text around them reads as the conversation.
-private func isQuiet(_ item: TranscriptItem) -> Bool {
+func isQuiet(_ item: TranscriptItem) -> Bool {
     switch item.kind {
     case .tool, .thinking: return true
     default: return false

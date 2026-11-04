@@ -17,6 +17,10 @@ import AppKit
 ///   BINARY_SELECT_AGENT=<agent id> with BINARY_SELECT: open that subagent
 ///   BINARY_SELECT_SERVER=<n>       BINARY_SELECT applies to the n-th server (0-based)
 ///   BINARY_WINDOW=<w>x<h>          resize the main window
+///   BINARY_ACTIVATE=1              bring the app to the front after launch (for UI tests)
+///   BINARY_CLICKS=<x,y|x,y|…>      after 5 s (BINARY_CLICKS_DELAY), click these points of the main
+///                                  window (points from its top left), 0.5 s apart; "s:dy" scrolls
+///                                  the transcript dy points toward its start instead
 ///   BINARY_SETTINGS=1              open the settings window (rendered too)
 ///   BINARY_FLAT=1                  sidebar without split-view vibrancy
 ///   BINARY_SCROLL_TOP=1            open transcripts at the top
@@ -38,10 +42,12 @@ import AppKit
 ///   BINARY_SCROLL_BENCH=<pages>    load that many older pages, show every row, then scroll
 ///                                  the transcript and print the time each step takes
 ///   BINARY_SCROLL_BENCH_RANGE=<pt> with BINARY_SCROLL_BENCH: scroll only that far from the end
+///   BINARY_SCROLL_BENCH_STEP=<pt>  with BINARY_SCROLL_BENCH: scroll this far per tick (default 40)
 ///   BINARY_SWITCH_BENCH=<n>        open the first n sessions of the sidebar in turn, twice, and
 ///                                  print the main thread's time for each switch (with
 ///                                  BINARY_TIMING, also each stall over 40 ms)
 ///   BINARY_LOG=1                   trace sidebar reveal and redirect steps on stderr
+///   BINARY_FIND=<query>            after 3 s, find this text in the open conversation (⌘F)
 ///   BINARY_SEARCH=<query>          type a query into the sidebar search
 ///   BINARY_OPEN_MATCH=1            with BINARY_SEARCH: open the first message that matched
 /// A text dump of client state (servers, menus, scroll views) is written next
@@ -92,6 +98,12 @@ enum DebugHooks {
                 }
             }
         }
+        if let query = env["BINARY_FIND"] {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 3) {
+                nav.transcriptSearchRequest += 1
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { feed(query) }
+            }
+        }
         if let keys = env["BINARY_KEYS"] {
             Task { @MainActor in
                 try? await Task.sleep(nanoseconds: 3_000_000_000)
@@ -108,6 +120,15 @@ enum DebugHooks {
                 f.origin.y += f.height - size[1]
                 f.size = NSSize(width: size[0], height: size[1])
                 w.setFrame(f, display: true)
+            }
+        }
+        if let clicks = env["BINARY_CLICKS"] {
+            DispatchQueue.main.asyncAfter(deadline: .now() + (Double(env["BINARY_CLICKS_DELAY"] ?? "") ?? 5)) { click(clicks) }
+        }
+        if env["BINARY_ACTIVATE"] == "1" {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+                NSApp.activate(ignoringOtherApps: true)
+                NSApp.windows.first { $0.isVisible && $0.contentView != nil }?.makeKeyAndOrderFront(nil)
             }
         }
 
@@ -141,8 +162,48 @@ enum DebugHooks {
         }
     }
 
+    /// BINARY_CLICKS: mouse clicks and wheel scrolls sent through the main
+    /// window as if from the user, without bringing the app to the front.
+    static func click(_ steps: String) {
+        guard let w = NSApp.windows.first(where: { $0.isVisible && $0.contentView != nil }) else { return err("clicks: no window") }
+        var delay = 0.0
+        for step in steps.split(separator: "|").map(String.init) {
+            DispatchQueue.main.asyncAfter(deadline: .now() + delay) {
+                if step.hasPrefix("s:"), let dy = Double(step.dropFirst(2)) {
+                    // The transcript (else the tallest scroll view), moved by dy toward its start.
+                    func scrollViews(_ v: NSView) -> [NSScrollView] {
+                        ((v as? NSScrollView).map { [$0] } ?? []) + v.subviews.flatMap(scrollViews)
+                    }
+                    guard let root = w.contentView else { return }
+                    let all = scrollViews(root)
+                    guard let sv = all.first(where: { $0.documentView is TranscriptTableView })
+                            ?? all.max(by: { ($0.documentView?.frame.height ?? 0) < ($1.documentView?.frame.height ?? 0) }),
+                          let doc = sv.documentView else { return }
+                    var o = sv.contentView.bounds.origin
+                    o.y = doc.isFlipped ? max(0, o.y - dy) : o.y + dy
+                    sv.contentView.scroll(to: o)
+                    sv.reflectScrolledClipView(sv.contentView)
+                    log("scroll \(dy) \(type(of: doc)) to \(Int(sv.contentView.bounds.minY)) of \(Int(doc.frame.height))")
+                    return
+                }
+                let xy = step.split(separator: ",").compactMap { Double($0) }
+                guard xy.count == 2 else { return }
+                let p = NSPoint(x: xy[0], y: w.frame.height - xy[1])
+                for type in [NSEvent.EventType.leftMouseDown, .leftMouseUp] {
+                    if let e = NSEvent.mouseEvent(with: type, location: p, modifierFlags: [], timestamp: ProcessInfo.processInfo.systemUptime,
+                                                  windowNumber: w.windowNumber, context: nil, eventNumber: 0, clickCount: 1, pressure: 1) {
+                        w.sendEvent(e)
+                    }
+                }
+                let hit = w.contentView?.superview?.hitTest(p) ?? w.contentView?.hitTest(p)
+                log("click \(step) on \(hit.map { String(describing: type(of: $0)) } ?? "nothing")")
+            }
+            delay += 0.5
+        }
+    }
+
     /// BINARY_SCROLL_BENCH: scrolls the tallest scroll view of the main window
-    /// 40 pt per 120 Hz tick, to the top and back (or within
+    /// 40 pt (BINARY_SCROLL_BENCH_STEP) per 120 Hz tick, to the top and back (or within
     /// BINARY_SCROLL_BENCH_RANGE of the end, three times), and prints the main
     /// thread's CPU time per step: scrolling, layout and display.
     static func scrollBench() {
@@ -161,14 +222,16 @@ enum DebugHooks {
         var y = flipped ? maxY : 0
         var up = true
         var work: [Double] = []
+        var phases = [0.0, 0.0, 0.0, 0.0]
         func cpu() -> Double { Double(clock_gettime_nsec_np(CLOCK_THREAD_CPUTIME_ID)) / 1e6 }
         var views = 0
         func count(_ v: NSView) { views += 1; v.subviews.forEach(count) }
         count(doc)
         err("bench: content \(Int(doc.frame.height))pt, \(views) views")
+        let step = CGFloat(Double(env["BINARY_SCROLL_BENCH_STEP"] ?? "") ?? 40)
         Timer.scheduledTimer(withTimeInterval: 1.0 / 120, repeats: true) { t in
             MainActor.assumeIsolated {
-                let toward: CGFloat = flipped == up ? -40 : 40
+                let toward: CGFloat = flipped == up ? -step : step
                 y += toward
                 if y < lo || y > hi {
                     y = min(max(y, lo), hi)
@@ -184,6 +247,9 @@ enum DebugHooks {
                         err(String(format: "bench: %d steps, ms per step avg %.2f p50 %.2f p95 %.2f max %.1f, over 8 ms %d",
                                    w.count, w.reduce(0, +) / Double(w.count), w[w.count / 2], w[w.count * 95 / 100],
                                    w.last ?? 0, w.filter { $0 > 8 }.count))
+                        let n = Double(w.count)
+                        err(String(format: "bench: ms per step: scroll %.2f layout %.2f display %.2f commit %.2f",
+                                   phases[0] / n, phases[1] / n, phases[2] / n, phases[3] / n))
                         if env["BINARY_SNAPSHOT_QUIT"] == "1" { exit(0) }
                         return
                     }
@@ -191,10 +257,14 @@ enum DebugHooks {
                 let t0 = cpu()
                 sv.contentView.scroll(to: NSPoint(x: 0, y: y))
                 sv.reflectScrolledClipView(sv.contentView)
+                let t1 = cpu()
                 sv.window?.layoutIfNeeded()
+                let t2 = cpu()
                 sv.window?.displayIfNeeded()
+                let t3 = cpu()
                 CATransaction.flush()
                 work.append(cpu() - t0)
+                phases[0] += t1 - t0; phases[1] += t2 - t1; phases[2] += t3 - t2; phases[3] += cpu() - t3
             }
         }
     }
