@@ -188,6 +188,11 @@ struct FlowText: NSViewRepresentable {
     /// Links to files open in Binary's preview; web links go to the browser.
     final class LinkRouter: NSObject, NSTextViewDelegate {
         var handler: FileLinkHandler?
+        /// The text last given to the view. The view's own copy can't be
+        /// compared: it gains attributes (fonts for CJK text, say), so it never
+        /// equals the source, and setting it again on every update reset the
+        /// selection, whose accessibility notice read the row back mid-update.
+        var applied: NSAttributedString?
         func textView(_ textView: NSTextView, clickedOnLink link: Any, at charIndex: Int) -> Bool {
             let url = (link as? URL) ?? (link as? String).flatMap { URL(string: $0) }
             guard let url, let handler else { return false }
@@ -214,7 +219,9 @@ struct FlowText: NSViewRepresentable {
         tv.isHorizontallyResizable = false
         tv.setContentHuggingPriority(.defaultLow, for: .horizontal)
         tv.linkTextAttributes = [.foregroundColor: linkColor, .cursor: NSCursor.pointingHand]
-        storage.setAttributedString(highlight.apply(text))
+        let shown = highlight.apply(text)
+        storage.setAttributedString(shown)
+        context.coordinator.applied = shown
         context.coordinator.handler = links
         tv.delegate = context.coordinator
         return tv
@@ -223,8 +230,9 @@ struct FlowText: NSViewRepresentable {
     func updateNSView(_ tv: FlowTextView, context: Context) {
         context.coordinator.handler = links
         let text = highlight.apply(text)
-        if tv.textStorage?.isEqual(to: text) == false {
+        if context.coordinator.applied?.isEqual(to: text) != true {
             tv.textStorage?.setAttributedString(text)
+            context.coordinator.applied = text
         }
         // Setting these lays the text out again, even when they are the same.
         if tv.linkTextAttributes?[.foregroundColor] as? NSColor != linkColor {
@@ -280,6 +288,8 @@ struct FlowText: UIViewRepresentable {
     /// Links to files open in Binary's preview; web links go to the browser.
     final class LinkRouter: NSObject, UITextViewDelegate {
         var handler: FileLinkHandler?
+        /// The text last given to the view (its own copy gains attributes).
+        var applied: NSAttributedString?
         func textView(_ textView: UITextView, primaryActionFor textItem: UITextItem, defaultAction: UIAction) -> UIAction? {
             guard case .link(let url) = textItem.content, let handler else { return defaultAction }
             return UIAction { _ in handler.open(url) }
@@ -297,7 +307,9 @@ struct FlowText: UIViewRepresentable {
         tv.setContentHuggingPriority(.defaultLow, for: .horizontal)
         tv.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
         tv.linkTextAttributes = [.foregroundColor: linkColor]
-        tv.attributedText = highlight.apply(text)
+        let shown = highlight.apply(text)
+        tv.attributedText = shown
+        context.coordinator.applied = shown
         context.coordinator.handler = links
         tv.delegate = context.coordinator
         return tv
@@ -306,8 +318,9 @@ struct FlowText: UIViewRepresentable {
     func updateUIView(_ tv: UITextView, context: Context) {
         context.coordinator.handler = links
         let text = highlight.apply(text)
-        if tv.attributedText?.isEqual(to: text) != true {
+        if context.coordinator.applied?.isEqual(to: text) != true {
             tv.attributedText = text
+            context.coordinator.applied = text
         }
         tv.linkTextAttributes = [.foregroundColor: linkColor]
     }

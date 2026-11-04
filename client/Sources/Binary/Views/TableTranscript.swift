@@ -524,6 +524,11 @@ struct TableRowContent: View {
     var body: some View {
         let theme = environment.theme
         rowBody(theme)
+            // A cell reused for another row, or a row whose text changed, builds
+            // its views anew. Updating a message's text view in place resets its
+            // selection, whose accessibility notice reads the cell back while it
+            // is being updated: a cycle SwiftUI reports at length, freezing the app.
+            .id(identity)
             .environment(\.searchHighlight, search)
             .environment(\.rowExpansion, expansion)
             .background {
@@ -538,6 +543,14 @@ struct TableRowContent: View {
             .padding(.bottom, bottom)
             .frame(width: width)
             .environment(\.self, environment)
+    }
+
+    private var identity: Int {
+        var h = Hasher()
+        h.combine(row)
+        h.combine(search.query)
+        h.combine(search.selected)
+        return h.finalize()
     }
 
     @ViewBuilder
