@@ -63,6 +63,7 @@ export class Log {
   readonly gen = randomUUID().slice(0, 8);
   entries: Entry[] = [];
   private byUuid = new Map<string, number>();
+  private taskOutputs = new Set<string>();
   private nextSeq = 1;
 
   has(uuid: string): boolean {
@@ -72,6 +73,11 @@ export class Log {
   /** Adds e unless an entry with the same uuid exists; returns the stored entry. */
   append(e: Entry): Entry | undefined {
     if (this.byUuid.has(e.uuid)) return undefined;
+    // The live SDK event and its saved shell notification may have different UUIDs.
+    if (e.outputTaskId) {
+      if (this.taskOutputs.has(e.outputTaskId)) return undefined;
+      this.taskOutputs.add(e.outputTaskId);
+    }
     const stored = { ...e, seq: this.nextSeq++ };
     this.byUuid.set(stored.uuid, this.entries.length);
     this.entries.push(stored);

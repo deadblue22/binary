@@ -304,6 +304,7 @@ struct Entry: Codable, Identifiable, Hashable, Sendable {
     var subtype: String?
     /// For subtype "app_event": the desktop event tag, e.g. "side-sessions-event".
     var event: String?
+    var outputTaskId: String?
     var text: String?
     var isError: Bool?
     var costUsd: Double?

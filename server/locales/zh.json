@@ -10,6 +10,7 @@
  "externalBackgroundTask": "在{holder}中打开，后台：{task}",
  "externalBackgroundTasks": "在{holder}中打开，{count} 个后台任务：{task} 等",
  "taskNotFound": "这个后台任务已经结束了",
+ "taskOutputUnavailable": "后台任务的输出文件不存在或无法读取",
  "queuedNotFound": "这条排队的消息已经发出或取消了",
  "holderDesktop": " Claude 桌面端",
  "holderTmux": " tmux ",

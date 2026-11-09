@@ -33,6 +33,8 @@ export interface Entry {
   subtype?: string;
   /** For subtype app_event: the tag the host app wrapped the message in. */
   event?: string;
+  /** Shell task whose console output can be opened from this notification. */
+  outputTaskId?: string;
   text?: Msg;
   isError?: boolean;
   costUsd?: number;
@@ -54,6 +56,11 @@ export interface RawMessage {
   isCompactSummary?: boolean;
   message?: { id?: string; model?: string; role?: string; content?: unknown };
   content?: unknown;
+  // background task notification
+  task_id?: string;
+  output_file?: string;
+  summary?: string;
+  status?: string;
   // result
   is_error?: boolean;
   result?: string;
@@ -228,6 +235,11 @@ function userEntry(m: RawMessage, uuid: string, onImage?: EntryOptions['onImage'
   return events[0];
 }
 
+function shellOutputTaskId(id: string, path: string): string | undefined {
+  // Claude Code's shell task IDs start with b. Agent files are transcripts.
+  return /^b[\w-]+$/.test(id) && path.endsWith(`/tasks/${id}.output`) ? id : undefined;
+}
+
 function between(s: string, open: string, close: string): string {
   const i = s.indexOf(open);
   if (i < 0) return '';
@@ -305,10 +317,12 @@ function userString(raw: string): Partialish | undefined {
     const status = between(t, '<status>', '</status>').trim();
     const summary = between(t, '<summary>', '</summary>').trim() || status;
     const result = between(t, '<result>', '</result>').trim();
+    const outputTaskId = status && shellOutputTaskId(between(t, '<task-id>', '</task-id>').trim(), between(t, '<output-file>', '</output-file>').trim());
     return {
       kind: 'system',
       subtype: 'task_notification',
       text: truncate(result ? `${summary}\n\n${result}` : summary, MAX_TEXT)[0],
+      ...(outputTaskId && { outputTaskId }),
       ...(status === 'failed' && { isError: true }),
     };
   }
@@ -362,6 +376,13 @@ function assistantEntry(m: RawMessage): Partialish | undefined {
 function systemEntry(m: RawMessage): Partialish | undefined {
   const text = contentText(m.content);
   switch (m.subtype) {
+    case 'task_notification': {
+      const outputTaskId = shellOutputTaskId(m.task_id ?? '', m.output_file ?? '');
+      return outputTaskId && m.summary ? {
+        kind: 'system', subtype: m.subtype, text: truncate(m.summary, MAX_TEXT)[0], outputTaskId,
+        ...(m.status === 'failed' && { isError: true }),
+      } : undefined;
+    }
     case 'compact_boundary':
       return { kind: 'system', subtype: 'compact_boundary', text: T('compacted') };
     case 'informational':

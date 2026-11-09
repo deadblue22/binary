@@ -63,6 +63,8 @@ targets:
         group: Shared/Views
       - path: ../Sources/Binary/Views/SlashCommands.swift
         group: Shared/Views
+      - path: ../Sources/Binary/Views/TaskOutputView.swift
+        group: Shared/Views
       - path: ../Sources/Binary/Views/Theme.swift
         group: Shared/Views
       - path: ../Sources/Binary/Views/ToolCallView.swift

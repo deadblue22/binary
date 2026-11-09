@@ -36,6 +36,7 @@ struct ContentView: View {
         .background(theme.c.background)
         .toolbarBackground(theme.c.background, for: .windowToolbar)
         .sheet(item: $nav.filePreview) { FilePreviewView(request: $0) }
+        .sheet(item: $nav.taskOutput) { TaskOutputView(request: $0) }
         .task {
             guard DebugHooks.openSettings else { return }
             try? await Task.sleep(nanoseconds: 1_200_000_000)

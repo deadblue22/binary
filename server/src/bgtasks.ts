@@ -4,7 +4,39 @@
 // desktop app only leaves this trail: the tool call that started a task, and
 // the <task-notification> (or TaskStop) that ended it.
 
+import { constants } from 'node:fs';
+import { open, realpath } from 'node:fs/promises';
+import { join } from 'node:path';
 import type { BackgroundTask } from './session.js';
+
+const OUTPUT_LIMIT = 64 * 1024;
+
+/** Read the tail of a regular task log inside Claude Code's temp directory. */
+export async function readTaskOutput(root: string, project: string, session: string, task: string) {
+  if (!/^[\w-]+$/.test(project) || !/^[\w-]+$/.test(session) || !/^[\w-]+$/.test(task)) return;
+  try {
+    const path = join(await realpath(root), project, session, 'tasks', `${task}.output`);
+    // Agent outputs can be links to transcripts. Only serve regular log files.
+    if (await realpath(path) !== path) return;
+    const file = await open(path, constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK);
+    try {
+      const stat = await file.stat();
+      if (!stat.isFile()) return;
+      const start = Math.max(0, stat.size - OUTPUT_LIMIT);
+      const buffer = Buffer.alloc(stat.size - start);
+      const { bytesRead } = await file.read(buffer, 0, buffer.length, start);
+      let first = 0;
+      // The tail can begin in the middle of a UTF-8 character.
+      while (start > 0 && first < bytesRead && (buffer[first]! & 0xc0) === 0x80) first++;
+      return { text: buffer.toString('utf8', first, bytesRead), truncated: start > 0 };
+    } finally {
+      await file.close();
+    }
+  } catch (error) {
+    if (['ENOENT', 'ENOTDIR', 'ELOOP', 'EACCES'].includes((error as NodeJS.ErrnoException).code ?? '')) return;
+    throw error;
+  }
+}
 
 type Block = { type?: string; id?: string; name?: string; input?: Record<string, unknown>; tool_use_id?: string; is_error?: boolean; text?: string; content?: unknown };
 type Line = {

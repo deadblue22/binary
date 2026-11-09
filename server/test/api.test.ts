@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
-import { mkdirSync, mkdtempSync, realpathSync, statSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, realpathSync, rmSync, statSync, symlinkSync, writeFileSync } from 'node:fs';
 import { createServer, request, type IncomingHttpHeaders, type Server } from 'node:http';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -108,6 +108,29 @@ test('event stream starts with a snapshot', async () => {
     }
   }
   ctrl.abort();
+});
+
+test('task output serves a bounded log for its session and rejects links', async (t) => {
+  const created = await call('POST', '/api/v1/sessions', { cwd: h.cwd });
+  assert.equal(created.status, 201);
+  const id = created.json.id as string;
+  const dir = join('/tmp', `claude-${process.getuid?.() ?? 'user'}`, h.cwd.replace(/[^a-zA-Z0-9]/g, '-'), id, 'tasks');
+  mkdirSync(dir, { recursive: true });
+  t.after(() => rmSync(join(dir, '..', '..'), { recursive: true, force: true }));
+  const path = `/api/v1/sessions/${id}/tasks`;
+  const log = join(dir, 'b1.output');
+  writeFileSync(log, 'first\nsecond\n');
+  assert.deepEqual(await call('GET', `${path}/b1/output`), {
+    status: 200, json: { text: 'first\nsecond\n', truncated: false },
+  });
+  writeFileSync(log, '前'.repeat(64 * 1024) + '后');
+  const tail = await call('GET', `${path}/b1/output`);
+  assert.equal(tail.status, 200);
+  assert.deepEqual(tail.json, { text: '前'.repeat(21844) + '后', truncated: true });
+  symlinkSync(log, join(dir, 'b2.output'));
+  assert.equal((await call('GET', `${path}/b2/output`)).status, 404);
+  assert.equal((await call('GET', `${path}/..%2Fb1/output`)).status, 404);
+  assert.equal((await call('GET', '/api/v1/sessions/nope/tasks/b1/output')).status, 404);
 });
 
 test('layout: newest change per field wins, shared over the event stream', async () => {

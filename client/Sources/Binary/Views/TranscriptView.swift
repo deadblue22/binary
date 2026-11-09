@@ -569,8 +569,8 @@ struct TranscriptRow: View, Equatable {
             ThinkingView(text: text)
         case .tool(let use, let result):
             ToolCallView(use: use, result: result, busy: busy, cwd: cwd)
-        case .system(let subtype, let text, let isError, let event):
-            SystemRow(subtype: subtype, text: text, isError: isError, event: event)
+        case .system(let subtype, let text, let isError, let event, let outputTaskId):
+            SystemRow(subtype: subtype, text: text, isError: isError, event: event, outputTaskId: outputTaskId)
         case .result(let e):
             ResultRow(entry: e)
         }
@@ -701,12 +701,13 @@ struct SystemRow: View {
     let text: String
     let isError: Bool
     var event: String? = nil
+    var outputTaskId: String? = nil
     @Environment(\.theme) private var theme
     @RowExpanded private var expanded = false
 
     var body: some View {
         if subtype == "task_notification" {
-            TaskNotificationRow(text: text, isError: isError)
+            TaskNotificationRow(text: text, isError: isError, outputTaskId: outputTaskId)
         } else if subtype == "app_event" {
             // Something the desktop app injected (linked-session updates,
             // messages from other sessions, CI, scheduled tasks): a quiet line.
@@ -783,7 +784,9 @@ struct TaskNotificationRow: View {
     var icon: String? = nil
     /// Quieter look for desktop-app events.
     var dim = false
+    var outputTaskId: String? = nil
     @Environment(\.theme) private var theme
+    @Environment(Navigation.self) private var nav
     @RowExpanded private var expanded = DebugHooks.expandTools
     @State private var hover = false
 
@@ -801,19 +804,29 @@ struct TaskNotificationRow: View {
         let tint = isError ? theme.c.danger : (dim ? theme.c.textFaint : theme.c.success)
         VStack(alignment: .leading, spacing: 0) {
             HStack(spacing: 9) {
-                IconTile(icon: isError ? "exclamationmark.octagon" : (icon ?? "bell"), tint: tint, size: 22 * min(theme.scale, 1.25))
-                SearchText(p.summary)
-                    .font(theme.font(.callout).weight(dim ? .regular : .medium))
-                    .foregroundStyle(dim ? theme.c.textMuted : theme.c.text)
-                    .lineLimit(p.body.isEmpty ? 2 : 1)
-                    .truncationMode(.tail)
-                Spacer(minLength: 4)
-                if !p.body.isEmpty { Chevron(expanded: expanded) }
+                HStack(spacing: 9) {
+                    IconTile(icon: isError ? "exclamationmark.octagon" : (icon ?? "bell"), tint: tint, size: 22 * min(theme.scale, 1.25))
+                    SearchText(p.summary)
+                        .font(theme.font(.callout).weight(dim ? .regular : .medium))
+                        .foregroundStyle(dim ? theme.c.textMuted : theme.c.text)
+                        .lineLimit(p.body.isEmpty ? 2 : 1)
+                        .truncationMode(.tail)
+                    Spacer(minLength: 4)
+                    if !p.body.isEmpty { Chevron(expanded: expanded) }
+                }
+                .padding(.vertical, 7)
+                .disclosureTap { withAnimation(.easeOut(duration: 0.12)) { expanded.toggle() } }
+                .allowsHitTesting(!p.body.isEmpty)
+                if let outputTaskId, let session = nav.selection?.sessionOnly {
+                    Button {
+                        nav.taskOutput = TaskOutputRequest(session: session, task: outputTaskId, title: p.summary)
+                    } label: {
+                        Label(tr("View output"), systemImage: "text.alignleft")
+                    }
+                    .buttonStyle(.themed(.secondary, compact: true))
+                }
             }
             .padding(.horizontal, 10)
-            .padding(.vertical, 7)
-            .disclosureTap { withAnimation(.easeOut(duration: 0.12)) { expanded.toggle() } }
-            .allowsHitTesting(!p.body.isEmpty)
             .background(hover && !expanded && !p.body.isEmpty ? theme.c.hover.opacity(0.6) : .clear)
             .onHover { hover = $0 }
             .help(p.summary)

@@ -5,7 +5,7 @@
 import { randomUUID } from 'node:crypto';
 import { closeSync, existsSync, openSync, readdirSync, readFileSync, readSync, realpathSync, statSync } from 'node:fs';
 import { homedir } from 'node:os';
-import { basename, isAbsolute, join, resolve } from 'node:path';
+import { basename, dirname, isAbsolute, join, resolve } from 'node:path';
 import { StringDecoder } from 'node:string_decoder';
 import {
   forkSession,
@@ -24,7 +24,7 @@ import {
   type SDKSessionInfo,
 } from '@anthropic-ai/claude-agent-sdk';
 import { lastMessageAt } from './activity.js';
-import { runningTasks } from './bgtasks.js';
+import { readTaskOutput, runningTasks } from './bgtasks.js';
 import { resumeNote, saveInterrupted, takeInterrupted, type Interrupted } from './restart.js';
 import { activeAgents, type ActiveAgent } from './claude.js';
 import { CommandProbe, toCommands, type Command } from './commands.js';
@@ -769,6 +769,31 @@ export class Manager implements SessionHost, SessionToolHost {
   async stopTask(id: string, taskId: string): Promise<void> {
     const s = this.sessions.get(id);
     if (!s || !(await s.stopTask(taskId))) throw new HttpError(404, T('taskNotFound'));
+  }
+
+  async taskOutput(id: string, taskId: string) {
+    const s = this.session(id);
+    if (!s) throw new HttpError(404, T('sessionNotFound'));
+    if (!/^[\w-]+$/.test(taskId)) throw new HttpError(404, T('taskOutputUnavailable'));
+    const cwd = s.cwd || this.cwdFor(id);
+    const standard = `claude-${process.getuid?.() ?? 'user'}`;
+    const custom = this.store.get(id)?.env?.CLAUDE_CODE_TMPDIR || this.opts.env.CLAUDE_CODE_TMPDIR;
+    const roots = custom ? [custom, join(custom, standard), join('/tmp', standard)] : [join('/tmp', standard)];
+    const slug = cwd.replace(/[^a-zA-Z0-9]/g, '-');
+    for (const root of roots) {
+      const output = await readTaskOutput(root, slug, id, taskId);
+      if (output) return output;
+    }
+    // A resumed session may still be stored under its original project.
+    const transcript = findTranscript(id, cwd);
+    const project = transcript ? basename(dirname(transcript)) : '';
+    if (project && project !== slug) {
+      for (const root of roots) {
+        const output = await readTaskOutput(root, project, id, taskId);
+        if (output) return output;
+      }
+    }
+    throw new HttpError(404, T('taskOutputUnavailable'));
   }
 
   cancelQueued(id: string, qid: string): void {

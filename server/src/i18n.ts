@@ -24,6 +24,7 @@ const CATALOG = {
   externalBackgroundTask: 'Open in {holder}, in the background: {task}',
   externalBackgroundTasks: 'Open in {holder}, {count} background tasks: {task}…',
   taskNotFound: 'That background task has already ended',
+  taskOutputUnavailable: 'The task output file is missing or unavailable',
   queuedNotFound: 'That queued message was already sent or cancelled',
   holderDesktop: 'the Claude desktop app',
   holderTmux: 'tmux',

@@ -9,7 +9,7 @@ struct TranscriptItem: Identifiable, Hashable {
         case assistant(text: String)
         case thinking(text: String)
         case tool(use: Block, result: Block?)
-        case system(subtype: String, text: String, isError: Bool, event: String?)
+        case system(subtype: String, text: String, isError: Bool, event: String?, outputTaskId: String? = nil)
         case result(Entry)
     }
     var id: String
@@ -524,7 +524,7 @@ enum TranscriptBuilder {
                     }
                 }
             case "system":
-                out.append(TranscriptItem(id: e.uuid, kind: .system(subtype: e.subtype ?? "", text: e.text ?? "", isError: e.isError ?? false, event: e.event), time: e.time))
+                out.append(TranscriptItem(id: e.uuid, kind: .system(subtype: e.subtype ?? "", text: e.text ?? "", isError: e.isError ?? false, event: e.event, outputTaskId: e.outputTaskId), time: e.time))
             case "result":
                 out.append(TranscriptItem(id: e.uuid, kind: .result(e), time: e.time))
             default:

@@ -32,7 +32,7 @@ enum TranscriptSearch {
             case .tool(let use, let result):
                 guard options.tools else { return nil }
                 text = [use.name, use.input?.pretty, result?.text].compactMap { $0 }.joined(separator: "\n")
-            case .system(let subtype, let value, _, _):
+            case .system(let subtype, let value, _, _, _):
                 text = subtype + "\n" + value
             case .result(let entry):
                 text = entry.text ?? ""

@@ -38,6 +38,7 @@ struct RootView: View {
         }
         .tint(theme.c.focus)
         .sheet(item: $nav.filePreview) { FilePreviewView(request: $0) }
+        .sheet(item: $nav.taskOutput) { TaskOutputView(request: $0) }
         .onChange(of: nav.selection, initial: true) { _, ref in select(ref) }
         .onChange(of: nav.draft) { _, d in if d != nil { nav.showingInfo = false } }
         .onChange(of: theme.lang) { _, _ in reconnect() }

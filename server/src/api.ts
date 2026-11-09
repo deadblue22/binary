@@ -201,6 +201,10 @@ export function createHandler(o: ApiOptions): (req: IncomingMessage, res: Server
     return ok({ ok: true });
   });
 
+  route('GET', '/api/v1/sessions/{id}/tasks/{taskId}/output', async ({ params }) =>
+    ok(await m.taskOutput(params.id, params.taskId)),
+  );
+
   // Continue in a copy instead of writing to a session another program holds.
   route('POST', '/api/v1/sessions/{id}/fork', async ({ req, params }) =>
     ok(await m.fork(params.id, await readJSON<{ title?: string; text?: string; images?: unknown }>(req)), 201),

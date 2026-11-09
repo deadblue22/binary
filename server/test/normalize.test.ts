@@ -76,6 +76,29 @@ const cases: { name: string; msg: RawMessage; kind?: string; check?: (e: NonNull
       assert.equal(e.subtype, 'task_notification');
       assert.equal(e.text, 'Agent "Survey" failed\n\ntrace');
       assert.equal(e.isError, true);
+      assert.equal(e.outputTaskId, undefined);
+    },
+  },
+  {
+    name: 'saved shell completion refers to its output by task ID',
+    msg: {
+      type: 'user',
+      uuid: 'u-shell',
+      message: { content: '<task-notification>\n<task-id>b123</task-id>\n<output-file>/tmp/tasks/b123.output</output-file>\n<status>completed</status>\n<summary>Command completed</summary>\n</task-notification>' },
+    },
+    kind: 'system',
+    check: (e) => assert.equal(e.outputTaskId, 'b123'),
+  },
+  {
+    name: 'live shell completion refers to its output by task ID',
+    msg: {
+      type: 'system', subtype: 'task_notification', uuid: 's-shell',
+      task_id: 'b123', output_file: '/tmp/tasks/b123.output', status: 'failed', summary: 'Command failed',
+    },
+    kind: 'system',
+    check: (e) => {
+      assert.equal(e.outputTaskId, 'b123');
+      assert.equal(e.isError, true);
     },
   },
   {

@@ -219,6 +219,10 @@ final class ServerConnection: Identifiable {
         let _: OK = try await requireAPI().post("/sessions/\(id)/tasks/\(task)/stop")
     }
 
+    func taskOutput(_ id: String, task: String) async throws -> TaskOutput {
+        try await requireAPI().get("/sessions/\(id)/tasks/\(task)/output")
+    }
+
     /// Takes a session over from the program running it (POST /sessions/{id}/takeover):
     /// ends that turn and makes this server the holder.
     @discardableResult

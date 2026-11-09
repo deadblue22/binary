@@ -1045,6 +1045,7 @@ export class Session {
         this.activity = T('apiRetry', { attempt: msg.attempt ?? '?', max: msg.max_retries ?? '?' });
         return true;
       case 'compact_boundary':
+      case 'task_notification':
       case 'local_command_output':
       case 'informational': {
         const e = toEntry(msg);

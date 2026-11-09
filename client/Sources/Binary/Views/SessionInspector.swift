@@ -85,6 +85,7 @@ struct SessionInspector: View {
     @Environment(Navigation.self) private var nav
     @Environment(\.theme) private var theme
     @State private var notice: String?
+    @State private var taskOutput: TaskOutputRequest?
     @State private var newGroup = false
     @State private var groupName = ""
     /// The whole subagent list is open (else only the latest few).
@@ -115,6 +116,7 @@ struct SessionInspector: View {
         .fillAvailable()
         // Same ground as the conversation; the cards' own fill sets them apart.
         .background(theme.c.background)
+        .sheet(item: $taskOutput) { TaskOutputView(request: $0) }
         .task(id: "\(sessionID)|\(s?.subagentCount ?? 0)") {
             if (s?.subagentCount ?? 0) > 0 { await conn.loadSubagents(sessionID) }
         }
@@ -208,7 +210,7 @@ struct SessionInspector: View {
                 InfoRow(icon: "bolt.horizontal.circle", label: tr("Turn"), value: s.statusText)
             }
             ForEach(tasks) { t in
-                BackgroundTaskRow(task: t) {
+                BackgroundTaskRow(task: t, onOutput: outputAction(t)) {
                     Task {
                         do { try await conn.stopTask(s.id, task: t.id) } catch { notice = error.localizedDescription }
                     }
@@ -242,13 +244,20 @@ struct SessionInspector: View {
     private func heldTasksCard(_ s: SessionSummary) -> some View {
         let tasks = (s.tasks ?? []).sorted { ($0.startedAt ?? .distantPast) < ($1.startedAt ?? .distantPast) }
         return InspectorCard(title: tr("Process"), trailing: tr("\(tasks.count) running")) {
-            ForEach(tasks) { t in BackgroundTaskRow(task: t, onStop: nil) }
+            ForEach(tasks) { t in BackgroundTaskRow(task: t, onOutput: outputAction(t), onStop: nil) }
             if let x = s.hold {
                 Text(tr("Running in \(x.holderName); stop them there."))
                     .font(theme.font(.caption))
                     .foregroundStyle(theme.c.textMuted)
                     .fixedSize(horizontal: false, vertical: true)
             }
+        }
+    }
+
+    private func outputAction(_ task: BackgroundTask) -> (() -> Void)? {
+        guard task.type == "shell" else { return nil }
+        return {
+            taskOutput = TaskOutputRequest(session: ref, task: task.id, title: task.description)
         }
     }
 
@@ -656,6 +665,7 @@ private struct TaskRow: View {
 /// A background task: what it is, how long it has run, and a stop button.
 private struct BackgroundTaskRow: View {
     let task: BackgroundTask
+    let onOutput: (() -> Void)?
     /// Absent when Binary can't stop it (another program runs it).
     let onStop: (() -> Void)?
     @Environment(\.theme) private var theme
@@ -700,6 +710,12 @@ private struct BackgroundTaskRow: View {
                     .lineLimit(1)
             }
             Spacer(minLength: 4)
+            if let onOutput {
+                Button(action: onOutput) { Image(systemName: "text.alignleft") }
+                    .buttonStyle(.icon(size: 22))
+                    .help(tr("View output"))
+                    .accessibilityLabel(tr("View output"))
+            }
             if let onStop {
                 Button {
                     stopping = true

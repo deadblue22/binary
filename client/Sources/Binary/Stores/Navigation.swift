@@ -26,6 +26,7 @@ final class Navigation {
     var draft: NewSessionDraft?
     /// A file a message links to, shown in the preview sheet.
     var filePreview: FilePreviewRequest?
+    var taskOutput: TaskOutputRequest?
     /// iOS: the open session's info sheet (the macOS info panel is a column).
     var showingInfo = false
 
