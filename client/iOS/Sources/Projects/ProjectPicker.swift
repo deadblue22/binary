@@ -4,6 +4,7 @@ import SwiftUI
 /// starred projects, each server's projects and recent folders, a folder
 /// browser and "New Project…". Swipe a row to star it or edit its settings.
 struct ProjectPicker: View {
+    let server: UUID
     let current: StartTarget?
     let onPick: (StartTarget) -> Void
     let onNew: (UUID?) -> Void
@@ -52,12 +53,12 @@ struct ProjectPicker: View {
                         .foregroundStyle(theme.c.textFaint)
                 }
                 Section {
-                    if let onBrowse, let server = current?.server ?? store.orderedConnections.first?.id {
+                    if let onBrowse {
                         Button { after { onBrowse(server) } } label: {
                             Label(tr("Open Folder…"), systemImage: "folder.badge.plus")
                         }
                     }
-                    Button { after { onNew(current?.server) } } label: {
+                    Button { after { onNew(server) } } label: {
                         Label(tr("New Project…"), systemImage: "plus")
                     }
                 }
