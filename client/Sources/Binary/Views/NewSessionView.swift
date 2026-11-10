@@ -26,11 +26,9 @@ struct NewSessionView: View {
     @State private var creating = false
     @State private var error: String?
     @State private var picking = false
-    /// Which side of the project button the list opens on, and how tall it may be.
-    @State private var pickerEdge: Edge = .bottom
-    @State private var pickerHeight: CGFloat?
     #if os(macOS)
-    @State private var pickerAnchor = ScreenAnchor()
+    /// The project list, which AppKit shows so it stays clear of the Dock.
+    @State private var pickerPopover = ScreenPopover()
     #endif
     @State private var browsing = false
     /// Which server "Open Folder…" browses when it isn't the one in the composer.
@@ -107,6 +105,18 @@ struct NewSessionView: View {
         .onAppear(perform: setUp)
         .onDisappear { paste.remove(); composingWatcher.remove() }
         .onChange(of: browsing) { _, open in if !open { browseServer = nil } }
+        #if os(macOS)
+        .onChange(of: picking) { _, open in
+            if open {
+                // How tall the list gets once recent folders arrive.
+                pickerPopover.show(tallest: 560, onClose: { picking = false }) { room in
+                    picker(maxHeight: room)
+                }
+            } else {
+                pickerPopover.close()
+            }
+        }
+        #endif
         .onChange(of: focused) { _, f in paste.active = f }
         .onChange(of: text) { _, _ in composing = focused && ComposingWatcher.composing() }
         .onChange(of: nav.effortStep) { _, step in stepEffort(step.delta) }
@@ -323,7 +333,7 @@ struct NewSessionView: View {
     }
 
     private var projectButton: some View {
-        Button { openPicker() } label: {
+        Button { picking = true } label: {
             ControlLabel(icon: config.worktree ? "square.stack.3d.up" : (project != nil ? "folder.fill" : "folder"),
                          text: project?.name ?? (folder.isEmpty ? tr("Choose a project…") : Project.defaultName(for: folder)))
         }
@@ -331,49 +341,38 @@ struct NewSessionView: View {
         .help(tr("Project (⌥⌘1…9 for starred ones)"))
         .disabled(conn == nil)
         #if os(macOS)
-        .screenAnchor(pickerAnchor)
+        .popoverAnchor(pickerPopover)
+        #else
+        .popover(isPresented: $picking, arrowEdge: .bottom) { picker(maxHeight: nil) }
         #endif
-        .popover(isPresented: $picking, arrowEdge: pickerEdge) {
-            if let conn {
-                ProjectPicker(server: conn.id, current: target, onPick: { t in
-                    picking = false
-                    if let p = projects.project(t.project) { choose(p) } else { pickFolder(server: t.server, t.folder) }
-                }, onNew: { server in
-                    picking = false
-                    newProject(on: server)
-                }, onEdit: { p in
-                    picking = false
-                    editing = EditRequest(project: p, isNew: false)
-                }, onEditFolder: { server, path in
-                    picking = false
-                    var p = Project(name: Project.defaultName(for: path), server: server, folder: path)
-                    p.startConfig = projects.config(for: StartTarget(server: server, folder: path, project: nil))
-                    editing = EditRequest(project: p, isNew: true)
-                }, onBrowse: { server in
-                    picking = false
-                    browseServer = server
-                    browsing = true
-                }, maxHeight: pickerHeight)
-                .environment(store)
-                .environment(projects)
-                .environment(\.theme, theme)
-            }
-        }
     }
 
-    private func openPicker() {
-        #if os(macOS)
-        // The bar sits at the bottom of the window, often right above the
-        // Dock: open below only when the whole list fits there, else on the
-        // roomier side, and cap the list at that room so recent folders
-        // arriving after it opens can't push it off the visible screen.
-        if let room = pickerAnchor.room {
-            let tallest: CGFloat = 560, arrow: CGFloat = 24
-            pickerEdge = room.below >= tallest + arrow || room.below >= room.above ? .bottom : .top
-            pickerHeight = (pickerEdge == .bottom ? room.below : room.above) - arrow
+    @ViewBuilder
+    private func picker(maxHeight: CGFloat?) -> some View {
+        if let conn {
+            ProjectPicker(server: conn.id, current: target, onPick: { t in
+                picking = false
+                if let p = projects.project(t.project) { choose(p) } else { pickFolder(server: t.server, t.folder) }
+            }, onNew: { server in
+                picking = false
+                newProject(on: server)
+            }, onEdit: { p in
+                picking = false
+                editing = EditRequest(project: p, isNew: false)
+            }, onEditFolder: { server, path in
+                picking = false
+                var p = Project(name: Project.defaultName(for: path), server: server, folder: path)
+                p.startConfig = projects.config(for: StartTarget(server: server, folder: path, project: nil))
+                editing = EditRequest(project: p, isNew: true)
+            }, onBrowse: { server in
+                picking = false
+                browseServer = server
+                browsing = true
+            }, maxHeight: maxHeight)
+            .environment(store)
+            .environment(projects)
+            .environment(\.theme, theme)
         }
-        #endif
-        picking = true
     }
 
     private func branchMenu(_ showText: Bool) -> some View {
