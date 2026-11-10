@@ -121,10 +121,11 @@ export class Store {
     return this.data.models;
   }
 
-  setModels(models: unknown[]): void {
-    if (JSON.stringify(models) === JSON.stringify(this.data.models)) return;
+  setModels(models: unknown[]): boolean {
+    if (JSON.stringify(models) === JSON.stringify(this.data.models)) return false;
     this.data.models = models;
     this.schedule();
+    return true;
   }
 
   private schedule(): void {

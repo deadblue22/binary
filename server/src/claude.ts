@@ -4,8 +4,30 @@ import { execFile } from 'node:child_process';
 import { existsSync, readFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import { dirname, join } from 'node:path';
+import { query, type Options, type SDKUserMessage } from '@anthropic-ai/claude-agent-sdk';
 
 const require = createRequire(import.meta.url);
+
+/** Read startup metadata without sending a message. */
+export async function probeClaude(options: Options) {
+  let finish!: () => void;
+  const done = new Promise<void>((resolve) => { finish = resolve; });
+  const input = { async *[Symbol.asyncIterator]() { await done; } } as AsyncIterable<SDKUserMessage>;
+  const q = query({ prompt: input, options });
+  let timeout: NodeJS.Timeout | undefined;
+  try {
+    return await Promise.race([
+      q.initializationResult(),
+      new Promise<never>((_, reject) => {
+        timeout = setTimeout(() => reject(new Error('timeout')), 60_000).unref();
+      }),
+    ]);
+  } finally {
+    clearTimeout(timeout);
+    finish();
+    q.close();
+  }
+}
 
 /** Variables that configure claude itself rather than describe a host session. */
 const KEPT_BY_DEFAULT = new Set([

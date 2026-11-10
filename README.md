@@ -230,7 +230,7 @@ Each session takes a single row; activity descriptions and errors are in the too
 
 ### Model, effort, permission mode
 
-These affect only the current session. The model list comes from the server's Claude Code (fetched after any session first starts); you can also choose "Custom…" to enter any model ID or alias. "Default" means using Claude Code's own setting. While the process runs, switching the model or a low–xhigh effort takes effect immediately, and `max` restarts the process automatically before the next turn (the session stays the same).
+These affect only the current session. The server reads the model list from Claude Code at startup and every five minutes, and pushes changes to connected clients; you can also choose "Custom…" to enter any model ID or alias. "Default" means using Claude Code's own setting. While the process runs, switching the model or a low–xhigh effort takes effect immediately, and `max` restarts the process automatically before the next turn (the session stays the same).
 
 - Click the effort below the message box to open the adjustment panel: the large text is the current level, colored on a gradient from blue at low to orange at max; the row below is the model, which opens the model menu; below that is a slider that snaps to the levels the server provides and commits on release. The ↺ at the top right restores "Default".
 - With "Default", it shows what that actually is: below the message box and in the info panel it reads "Default · Medium" or "Default · Opus 5.5" (the effort and model actually in effect on the last turn), and the slider in the panel is dimmed at that level; before any turn has run, it reads just "Default" and the slider sits in the middle.

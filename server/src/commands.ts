@@ -3,7 +3,8 @@
 // and skills; MCP prompts). A live session reports its own list; for any other
 // folder a short-lived process starts up and answers (no prompt, no model call).
 
-import { query, type Options, type SDKUserMessage, type SlashCommand } from '@anthropic-ai/claude-agent-sdk';
+import type { Options, SlashCommand } from '@anthropic-ai/claude-agent-sdk';
+import { probeClaude } from './claude.js';
 
 /** A command as clients get it. */
 export interface Command {
@@ -59,21 +60,14 @@ export class CommandProbe {
   }
 
   private async probe(cwd: string): Promise<SlashCommand[]> {
-    const input = { async *[Symbol.asyncIterator]() { await new Promise(() => undefined); } } as AsyncIterable<SDKUserMessage>;
-    const q = query({ prompt: input, options: this.options(cwd) });
     try {
-      const init = await Promise.race([
-        q.initializationResult(),
-        new Promise<never>((_, no) => setTimeout(() => no(new Error('timeout')), 60_000).unref()),
-      ]);
+      const init = await probeClaude(this.options(cwd));
       const list = init.commands ?? [];
       this.cache.set(cwd, { at: Date.now(), list });
       return list;
     } catch (err) {
       this.log(`reading slash commands in ${cwd} failed: ${(err as Error).message}`);
       return this.cache.get(cwd)?.list ?? [];
-    } finally {
-      q.close();
     }
   }
 }

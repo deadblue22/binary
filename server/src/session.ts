@@ -125,7 +125,6 @@ export interface SettingsUpdate {
 /** What a session needs from the manager. */
 export interface SessionHost {
   queryOptions(s: Session): Promise<Options>;
-  onModels(models: unknown[]): void;
   /** Slash commands Claude Code says only a terminal can run. */
   onTerminalCommands?(names: string[]): void;
   markDirty(id: string): void;
@@ -620,7 +619,6 @@ export class Session {
 
     try {
       const init = await withTimeout(q.initializationResult(), 120_000, T('initTimeout'));
-      if (Array.isArray(init.models)) this.host.onModels(init.models);
       if (Array.isArray(init.commands)) this.commands = init.commands;
     } catch (err) {
       proc.closing = true;

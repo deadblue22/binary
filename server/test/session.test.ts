@@ -13,6 +13,26 @@ import { harness, hasFlag, transcriptLine, waitFor, writeTranscript } from './he
 const lines = (s: { log: { entries: { kind: string; blocks?: { type: string; text?: unknown }[] }[] } }) =>
   s.log.entries.map((e) => `${e.kind} ${(e.blocks ?? []).map((b) => `${b.type}:${String(b.text ?? '')}`).join('|')}`.trim());
 
+test('model catalog loads at startup and pushes changes without a session', async () => {
+  const h = await harness();
+  try {
+    await waitFor('startup model catalog', () => h.manager.store.models() !== undefined);
+    const models = h.manager.models();
+    h.manager.store.setModels([{ value: 'old', displayName: 'Old' }]);
+    const events: Ev[] = [];
+    h.manager.subscribeGlobal(collect(events));
+    await h.manager.refreshModels();
+    await h.manager.refreshModels();
+    assert.deepEqual(events.filter((e) => e.type === 'models').map((e) => JSON.parse(e.data).models), [
+      [{ value: 'old', displayName: 'Old' }], models,
+    ]);
+    assert.deepEqual(h.manager.models(), models);
+    assert.deepEqual(h.manager.summaries(), []);
+  } finally {
+    await h.close();
+  }
+});
+
 test('create, stream and merge with the stored transcript', async () => {
   const h = await harness();
   try {
@@ -42,9 +62,6 @@ test('create, stream and merge with the stored transcript', async () => {
     for (const [flag, value] of [['--session-id', sum.id], ['--model', 'haiku'], ['--effort', 'low']]) {
       assert.ok(hasFlag(launch, flag, value), `${launch} lacks ${flag} ${value}`);
     }
-
-    // Models reported at initialize are cached for /info.
-    assert.deepEqual((h.manager.models() as { value: string }[]).map((m) => m.value), ['fake']);
 
     // After the process ends, the transcript is reloaded without duplicates or a reset.
     const gen = s.log.gen;

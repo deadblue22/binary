@@ -26,7 +26,7 @@ import {
 import { lastMessageAt } from './activity.js';
 import { readTaskOutput, runningTasks } from './bgtasks.js';
 import { resumeNote, saveInterrupted, takeInterrupted, type Interrupted } from './restart.js';
-import { activeAgents, type ActiveAgent } from './claude.js';
+import { activeAgents, probeClaude, type ActiveAgent } from './claude.js';
 import { CommandProbe, toCommands, type Command } from './commands.js';
 import type { Config } from './config.js';
 import { DesktopLinks } from './desktop.js';
@@ -427,8 +427,15 @@ export class Manager implements SessionHost, SessionToolHost {
     return this.store.models() ?? FALLBACK_MODELS;
   }
 
-  onModels(models: unknown[]): void {
-    if (models.length) this.store.setModels(models);
+  async refreshModels(): Promise<void> {
+    try {
+      const { models } = await probeClaude({ ...this.probeOptions(homedir()), persistSession: false });
+      if (!this.closing && Array.isArray(models) && models.length && this.store.setModels(models)) {
+        this.broadcastGlobal(event('models', { models }));
+      }
+    } catch (err) {
+      this.log(`reading models failed: ${(err as Error).message}`);
+    }
   }
 
   onTerminalCommands(names: string[]): void {
@@ -473,6 +480,9 @@ export class Manager implements SessionHost, SessionToolHost {
     every(200, () => this.flushDirty());
     every(1000, () => this.tick());
     every(30_000, () => this.reap());
+    // A fresh process can see catalog changes while existing sessions stay open.
+    void this.refreshModels();
+    every(5 * 60_000, () => this.refreshModels());
     // The text index takes a few seconds to build: start it before the first search.
     const warm = setTimeout(() => this.searcher.warm(), 2_000);
     warm.unref();
@@ -1286,6 +1296,7 @@ export class Manager implements SessionHost, SessionToolHost {
     const sub: Subscriber = new Subscriber(sink, () => this.global.delete(sub), lang);
     sub.send(event('sessions', { sessions: this.summaries() }));
     sub.send(event('layout', { layout: this.store.layout() }));
+    sub.send(event('models', { models: this.models() }));
     this.global.add(sub);
     return sub;
   }

@@ -157,6 +157,9 @@ final class ServerConnection: Identifiable {
         case "layout":
             struct LayoutEvent: Decodable { var layout: SharedLayout }
             if let ev = try? dec.decode(LayoutEvent.self, from: data) { received(ev.layout) }
+        case "models":
+            struct ModelsEvent: Decodable { var models: [ModelInfo] }
+            if let ev = try? dec.decode(ModelsEvent.self, from: data) { info?.models = ev.models }
         case "removed":
             guard let ev = try? dec.decode(RemovedEvent.self, from: data) else { return }
             sessions[ev.id] = nil

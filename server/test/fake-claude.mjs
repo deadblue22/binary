@@ -43,7 +43,9 @@ if (!resumed && existsSync(file)) {
   process.stderr.write('Error: session id already in use\n');
   process.exit(1);
 }
-appendFileSync(join(configDir, 'launches.log'), args.join(' ') + (process.env.FOO ? ` FOO=${process.env.FOO}` : '') + ` CWD=${cwd}` + '\n');
+if (!args.includes('--no-session-persistence')) {
+  appendFileSync(join(configDir, 'launches.log'), args.join(' ') + (process.env.FOO ? ` FOO=${process.env.FOO}` : '') + ` CWD=${cwd}` + '\n');
+}
 
 let model = arg('--model') ?? 'fake-model';
 let lastUuid = null;
