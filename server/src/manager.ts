@@ -385,6 +385,7 @@ export class Manager implements SessionHost, SessionToolHost {
   /** Sessions a client took over from the program running them (see takeover). */
   private takenOver = new Set<string>();
   private global = new Set<Subscriber>();
+  private modelRefreshTimer?: NodeJS.Timeout;
   private dirty = new Set<string>();
   private timers: NodeJS.Timeout[] = [];
   private listing = false;
@@ -427,7 +428,13 @@ export class Manager implements SessionHost, SessionToolHost {
     return this.store.models() ?? FALLBACK_MODELS;
   }
 
-  async refreshModels(): Promise<void> {
+  private async refreshModels(): Promise<void> {
+    if (this.closing || this.modelRefreshTimer) return;
+    // Share one refresh across connections and only recheck while a client is connected.
+    this.modelRefreshTimer = setTimeout(() => {
+      this.modelRefreshTimer = undefined;
+      if (this.global.size) void this.refreshModels();
+    }, 60 * 60_000).unref();
     try {
       const { models } = await probeClaude({ ...this.probeOptions(homedir()), persistSession: false });
       if (!this.closing && Array.isArray(models) && models.length && this.store.setModels(models)) {
@@ -480,9 +487,6 @@ export class Manager implements SessionHost, SessionToolHost {
     every(200, () => this.flushDirty());
     every(1000, () => this.tick());
     every(30_000, () => this.reap());
-    // A fresh process can see catalog changes while existing sessions stay open.
-    void this.refreshModels();
-    every(5 * 60_000, () => this.refreshModels());
     // The text index takes a few seconds to build: start it before the first search.
     const warm = setTimeout(() => this.searcher.warm(), 2_000);
     warm.unref();
@@ -961,6 +965,7 @@ export class Manager implements SessionHost, SessionToolHost {
    */
   async shutdown(graceMs = 0): Promise<void> {
     this.closing = true;
+    clearTimeout(this.modelRefreshTimer);
     for (const t of this.timers) clearInterval(t);
     this.lister.close();
     this.searcher.close();
@@ -1297,7 +1302,10 @@ export class Manager implements SessionHost, SessionToolHost {
     sub.send(event('sessions', { sessions: this.summaries() }));
     sub.send(event('layout', { layout: this.store.layout() }));
     sub.send(event('models', { models: this.models() }));
-    this.global.add(sub);
+    if (!sub.closed) {
+      this.global.add(sub);
+      void this.refreshModels();
+    }
     return sub;
   }
 
