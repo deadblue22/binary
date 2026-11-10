@@ -568,3 +568,90 @@ final class ComposingWatcher {
     func remove() {}
 }
 #endif
+
+// MARK: - Screen popover
+
+#if os(macOS)
+/// A popover AppKit shows from a view, on the side we choose. SwiftUI's
+/// `.popover` leaves the side to AppKit, which measures against the whole
+/// screen: from the composer bar, right above a Dock that isn't hidden, it
+/// overlapped the button and ran off the bottom whatever `arrowEdge` said.
+@MainActor
+final class ScreenPopover: NSObject, NSPopoverDelegate {
+    fileprivate weak var view: NSView?
+    private var popover: NSPopover?
+    private var onClose: (() -> Void)?
+
+    /// Points between the view and the top and bottom of the screen's
+    /// visible frame, which leaves out the menu bar and the Dock.
+    var room: (above: CGFloat, below: CGFloat)? {
+        guard let view, let window = view.window, let screen = window.screen else { return nil }
+        let rect = window.convertToScreen(view.convert(view.bounds, to: nil))
+        let visible = screen.visibleFrame
+        return (visible.maxY - rect.maxY, rect.minY - visible.minY)
+    }
+
+    /// Opens below the view when `tallest` fits there, else on the roomier
+    /// side; `content` gets the height it must stay within on that side.
+    func show<Content: View>(tallest: CGFloat, onClose: @escaping () -> Void,
+                             content: (CGFloat) -> Content) {
+        guard popover == nil else { return }
+        guard let view, let room else { onClose(); return }
+        let arrow: CGFloat = 24
+        let below = room.below >= tallest + arrow || room.below >= room.above
+        let host = NSHostingController(rootView: content((below ? room.below : room.above) - arrow))
+        host.sizingOptions = .preferredContentSize
+        let p = NSPopover()
+        p.behavior = .transient
+        p.contentViewController = host
+        p.delegate = self
+        popover = p
+        self.onClose = onClose
+        // The edge is in the view's own coordinates; this one isn't flipped.
+        p.show(relativeTo: view.bounds, of: view, preferredEdge: below ? .minY : .maxY)
+        // Key from the start, so its search field takes typing and its
+        // shortcuts and the first click on a row reach it, not the window under it.
+        host.view.window?.makeKey()
+    }
+
+    func close() { popover?.performClose(nil) }
+
+    func popoverDidClose(_ notification: Notification) {
+        popover = nil
+        let done = onClose
+        onClose = nil
+        done?()
+    }
+}
+
+extension View {
+    /// Makes this view the one `popover` opens from.
+    func popoverAnchor(_ popover: ScreenPopover) -> some View {
+        background(PopoverAnchorView(popover: popover))
+    }
+}
+
+private struct PopoverAnchorView: NSViewRepresentable {
+    let popover: ScreenPopover
+    func makeNSView(context: Context) -> AnchorNSView { AnchorNSView(popover: popover) }
+    func updateNSView(_ view: AnchorNSView, context: Context) {}
+}
+
+final class AnchorNSView: NSView {
+    private let popover: ScreenPopover
+
+    init(popover: ScreenPopover) {
+        self.popover = popover
+        super.init(frame: .zero)
+    }
+
+    required init?(coder: NSCoder) { fatalError("init(coder:) has not been implemented") }
+
+    override func viewDidMoveToWindow() {
+        super.viewDidMoveToWindow()
+        // A bar laid out by ViewThatFits can hold two copies of the button:
+        // the one on screen is the one that has a window.
+        if window != nil { popover.view = self }
+    }
+}
+#endif

@@ -12,11 +12,16 @@ struct ProjectPicker: View {
     /// The options button on a plain folder: save it as a project with its settings.
     var onEditFolder: ((UUID, String) -> Void)? = nil
     var onBrowse: ((UUID) -> Void)? = nil
+    /// The tallest the whole picker may be: the room the popover has on screen.
+    var maxHeight: CGFloat? = nil
     @Environment(ServerStore.self) private var store
     @Environment(ProjectStore.self) private var projects
     @Environment(\.theme) private var theme
     @State private var query = ""
     @State private var recent: [UUID: [String]] = [:]
+    /// The search field and the buttons under the list, as laid out.
+    @State private var searchHeight: CGFloat = 40
+    @State private var footerHeight: CGFloat = 70
     @FocusState private var searchFocused: Bool
 
     private var q: String { query.trimmingCharacters(in: .whitespaces).lowercased() }
@@ -24,6 +29,12 @@ struct ProjectPicker: View {
 
     private func matches(_ name: String, _ folder: String) -> Bool {
         q.isEmpty || name.lowercased().contains(q) || folder.lowercased().contains(q)
+    }
+
+    /// The list scrolls past this, so the picker fits in `maxHeight`.
+    private var listLimit: CGFloat {
+        guard let maxHeight else { return 440 }
+        return min(440, max(120, maxHeight - searchHeight - footerHeight - 2))
     }
 
     var body: some View {
@@ -37,6 +48,7 @@ struct ProjectPicker: View {
             .font(theme.font(.callout))
             .padding(.horizontal, 12)
             .padding(.vertical, 10)
+            .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { searchHeight = $0 }
             Rectangle().fill(theme.c.border).frame(height: 1)
             ScrollView {
                 VStack(alignment: .leading, spacing: 0) {
@@ -47,7 +59,7 @@ struct ProjectPicker: View {
                 .padding(.vertical, 4)
                 .slimScrollers()
             }
-            .frame(maxHeight: 440)
+            .frame(maxHeight: listLimit)
             .fixedSize(horizontal: false, vertical: true)
             if let conn {
                 Rectangle().fill(theme.c.border).frame(height: 1)
@@ -58,6 +70,7 @@ struct ProjectPicker: View {
                     PickerRow(icon: "plus", title: tr("New Project…"), shortcut: "⌥⌘0") { onNew(conn.id) }
                 }
                 .padding(.vertical, 4)
+                .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { footerHeight = $0 }
             }
         }
         .frame(width: 400)

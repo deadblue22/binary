@@ -26,6 +26,10 @@ struct NewSessionView: View {
     @State private var creating = false
     @State private var error: String?
     @State private var picking = false
+    #if os(macOS)
+    /// The project list, which AppKit shows so it stays clear of the Dock.
+    @State private var pickerPopover = ScreenPopover()
+    #endif
     @State private var browsing = false
     /// Which server "Open Folder…" browses when it isn't the one in the composer.
     @State private var browseServer: UUID?
@@ -86,11 +90,11 @@ struct NewSessionView: View {
         .background {
             // ⌥⌘1…9 pick starred projects, ⌥⌘0 adds one, without opening the list.
             ForEach(0..<min(9, projects.favorites.count), id: \.self) { i in
-                Button("") { choose(projects.favorites[i]) }
+                Button("") { picking = false; choose(projects.favorites[i]) }
                     .keyboardShortcut(KeyEquivalent(Character("\(i + 1)")), modifiers: [.command, .option])
                     .hidden()
             }
-            Button("") { newProject() }.keyboardShortcut("0", modifiers: [.command, .option]).hidden()
+            Button("") { picking = false; newProject() }.keyboardShortcut("0", modifiers: [.command, .option]).hidden()
         }
         .navigationTitle(parent == nil ? tr("New Session") : tr("New Child Session"))
         #if os(macOS)
@@ -101,6 +105,18 @@ struct NewSessionView: View {
         .onAppear(perform: setUp)
         .onDisappear { paste.remove(); composingWatcher.remove() }
         .onChange(of: browsing) { _, open in if !open { browseServer = nil } }
+        #if os(macOS)
+        .onChange(of: picking) { _, open in
+            if open {
+                // How tall the list gets once recent folders arrive.
+                pickerPopover.show(tallest: 560, onClose: { picking = false }) { room in
+                    picker(maxHeight: room)
+                }
+            } else {
+                pickerPopover.close()
+            }
+        }
+        #endif
         .onChange(of: focused) { _, f in paste.active = f }
         .onChange(of: text) { _, _ in composing = focused && ComposingWatcher.composing() }
         .onChange(of: nav.effortStep) { _, step in stepEffort(step.delta) }
@@ -328,31 +344,38 @@ struct NewSessionView: View {
         .buttonStyle(.plain)
         .help(tr("Project (⌥⌘1…9 for starred ones)"))
         .disabled(conn == nil)
-        .popover(isPresented: $picking, arrowEdge: .bottom) {
-            if let conn {
-                ProjectPicker(server: conn.id, current: target, onPick: { t in
-                    picking = false
-                    if let p = projects.project(t.project) { choose(p) } else { pickFolder(server: t.server, t.folder) }
-                }, onNew: { server in
-                    picking = false
-                    newProject(on: server)
-                }, onEdit: { p in
-                    picking = false
-                    editing = EditRequest(project: p, isNew: false)
-                }, onEditFolder: { server, path in
-                    picking = false
-                    var p = Project(name: Project.defaultName(for: path), server: server, folder: path)
-                    p.startConfig = projects.config(for: StartTarget(server: server, folder: path, project: nil))
-                    editing = EditRequest(project: p, isNew: true)
-                }, onBrowse: { server in
-                    picking = false
-                    browseServer = server
-                    browsing = true
-                })
-                .environment(store)
-                .environment(projects)
-                .environment(\.theme, theme)
-            }
+        #if os(macOS)
+        .popoverAnchor(pickerPopover)
+        #else
+        .popover(isPresented: $picking, arrowEdge: .bottom) { picker(maxHeight: nil) }
+        #endif
+    }
+
+    @ViewBuilder
+    private func picker(maxHeight: CGFloat?) -> some View {
+        if let conn {
+            ProjectPicker(server: conn.id, current: target, onPick: { t in
+                picking = false
+                if let p = projects.project(t.project) { choose(p) } else { pickFolder(server: t.server, t.folder) }
+            }, onNew: { server in
+                picking = false
+                newProject(on: server)
+            }, onEdit: { p in
+                picking = false
+                editing = EditRequest(project: p, isNew: false)
+            }, onEditFolder: { server, path in
+                picking = false
+                var p = Project(name: Project.defaultName(for: path), server: server, folder: path)
+                p.startConfig = projects.config(for: StartTarget(server: server, folder: path, project: nil))
+                editing = EditRequest(project: p, isNew: true)
+            }, onBrowse: { server in
+                picking = false
+                browseServer = server
+                browsing = true
+            }, maxHeight: maxHeight)
+            .environment(store)
+            .environment(projects)
+            .environment(\.theme, theme)
         }
     }
 
