@@ -230,8 +230,19 @@ struct FlowText: NSViewRepresentable {
     func updateNSView(_ tv: FlowTextView, context: Context) {
         context.coordinator.handler = links
         let text = highlight.apply(text)
-        if context.coordinator.applied?.isEqual(to: text) != true {
-            tv.textStorage?.setAttributedString(text)
+        if let storage = tv.textStorage, context.coordinator.applied?.isEqual(to: text) != true {
+            if storage.string == text.string {
+                // Only the styling changed (search highlights moving from match to
+                // match): restyling in place keeps the selection, so no accessibility
+                // notice reads the row back mid-update, which froze the app.
+                storage.beginEditing()
+                text.enumerateAttributes(in: NSRange(location: 0, length: text.length)) { attrs, range, _ in
+                    storage.setAttributes(attrs, range: range)
+                }
+                storage.endEditing()
+            } else {
+                storage.setAttributedString(text)
+            }
             context.coordinator.applied = text
         }
         // Setting these lays the text out again, even when they are the same.
