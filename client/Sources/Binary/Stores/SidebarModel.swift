@@ -61,6 +61,16 @@ struct ProjectGroup: Identifiable {
     }
 }
 
+/// A server's saved projects as the sidebar uses them when grouping by
+/// project (`ProjectStore.sidebarProjects`), by `ProjectGroup.folder`.
+struct SidebarProjects {
+    /// Starred folders in the order they were starred; each gets a section
+    /// of its own, sessions or not.
+    var starred: [String] = []
+    /// Project names, shown instead of the folder's.
+    var names: [String: String] = [:]
+}
+
 /// A session row in an area that spans servers.
 struct PlacedNode: Identifiable {
     let node: SidebarNode
@@ -186,9 +196,8 @@ enum SidebarBuilder {
     static let recentWindow: TimeInterval = 3 * 86400
 
     /// `hits`: sessions whose messages match `query` (ContentSearch), by id.
-    /// `starred`: the folders of the server's starred projects, the ones that
-    /// get a section of their own when grouping by project.
-    static func build(_ conn: ServerConnection, org: SessionOrganizer, query: String, starred: Set<String>,
+    /// `projects`: the server's saved projects, for grouping by project.
+    static func build(_ conn: ServerConnection, org: SessionOrganizer, query: String, projects: SidebarProjects = SidebarProjects(),
                       mirrors: MirrorIndex = MirrorIndex(), hits: [String: ContentHit] = [:]) -> SidebarSection {
         let layout = org.layout(conn.id)
         let hidden = org.showMirrors ? [] : mirrors.hidden(on: conn.id)
@@ -275,9 +284,12 @@ enum SidebarBuilder {
         }
         let ungrouped = rest.filter { $0.session.group == nil }
         if byProject {
+            let starred = Set(projects.starred)
             let isStarred = { (n: SidebarNode) in starred.contains(ProjectGroup.folder(of: n.session.cwd)) }
-            section.projects = projectGroups(ungrouped.filter(isStarred), server: conn.id, org: org)
-            section.otherProjects = projectGroups(ungrouped.filter { !isStarred($0) }, server: conn.id, org: org)
+            section.projects = projectGroups(ungrouped.filter(isStarred), server: conn.id, org: org,
+                                             names: projects.names, order: projects.starred)
+            section.otherProjects = projectGroups(ungrouped.filter { !isStarred($0) }, server: conn.id, org: org,
+                                                  names: projects.names)
             section.otherProjectsCollapsed = org.isOtherProjectsCollapsed(conn.id)
         } else {
             section.ungrouped = ungrouped
@@ -286,20 +298,24 @@ enum SidebarBuilder {
     }
 
     /// Sessions by project folder, the projects in the order their first
-    /// session comes in `nodes`.
-    static func projectGroups(_ nodes: [SidebarNode], server: UUID, org: SessionOrganizer) -> [ProjectGroup] {
-        var folders: [String] = []
+    /// session comes in `nodes`. With `order`, in that order instead, each
+    /// folder in it shown even with no sessions. Saved projects show their
+    /// name from `names`, other folders theirs.
+    static func projectGroups(_ nodes: [SidebarNode], server: UUID, org: SessionOrganizer,
+                              names saved: [String: String] = [:], order: [String]? = nil) -> [ProjectGroup] {
+        var folders = order ?? []
+        var listed = Set(folders)
         var members: [String: [SidebarNode]] = [:]
         for n in nodes {
             let f = ProjectGroup.folder(of: n.session.cwd)
-            if members[f] == nil { folders.append(f) }
+            if listed.insert(f).inserted { folders.append(f) }
             members[f, default: []].append(n)
         }
         func last(_ f: String) -> String { (f as NSString).lastPathComponent }
-        let names = Dictionary(grouping: folders, by: last).mapValues(\.count)
+        let names = Dictionary(grouping: folders.filter { saved[$0] == nil }, by: last).mapValues(\.count)
         return folders.map { f in
-            var name = f.isEmpty ? tr("No Folder") : last(f)
-            if names[name, default: 0] > 1 {
+            var name = f.isEmpty ? tr("No Folder") : saved[f] ?? last(f)
+            if saved[f] == nil, names[name, default: 0] > 1 {
                 let up = last((f as NSString).deletingLastPathComponent)
                 if !up.isEmpty && up != "/" { name = up + "/" + name }
             }

@@ -170,9 +170,21 @@ final class ProjectStore {
     /// Starred projects in the order they were starred; ⌥⌘1…9 pick the first nine.
     var favorites: [Project] { projects.filter(\.starred) }
 
-    /// Folders of the starred projects on a server, as sessions are grouped by.
-    func starredFolders(on server: UUID) -> Set<String> {
-        Set(projects.filter { $0.starred && $0.server == server }.map { ProjectGroup.folder(of: $0.folder) })
+    /// A server's projects as the sidebar groups sessions by them: the names,
+    /// and the starred ones in the order they were starred.
+    func sidebarProjects(on server: UUID) -> SidebarProjects {
+        var out = SidebarProjects()
+        for p in projects where p.server == server {
+            let f = ProjectGroup.folder(of: p.folder)
+            if out.names[f] == nil, !p.name.isEmpty { out.names[f] = p.name }
+            if p.starred, !out.starred.contains(f) { out.starred.append(f) }
+        }
+        return out
+    }
+
+    /// The project a sidebar section stands for (`ProjectGroup.folder`).
+    func project(server: UUID, section folder: String) -> Project? {
+        projects.first { $0.server == server && ProjectGroup.folder(of: $0.folder) == folder }
     }
 
     func projects(on server: UUID) -> [Project] {

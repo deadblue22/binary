@@ -25,7 +25,7 @@ struct SidebarView: View {
     var body: some View {
         let mirrors = MirrorIndex(store.orderedConnections)
         let sections = store.orderedConnections.map {
-            SidebarBuilder.build($0, org: org, query: query, starred: projects.starredFolders(on: $0.id), mirrors: mirrors, hits: content.hits(for: $0.id, query: query))
+            SidebarBuilder.build($0, org: org, query: query, projects: projects.sidebarProjects(on: $0.id), mirrors: mirrors, hits: content.hits(for: $0.id, query: query))
         }
         let merged = SidebarBuilder.merge(sections, org: org)
         let order = SidebarBuilder.visibleOrder(sections, merged: merged, org: org, showAll: showAllAgents)
@@ -579,7 +579,7 @@ struct SidebarView: View {
         // pinned or grouped apart from its parent isn't under that parent.
         let mirrors = MirrorIndex(store.orderedConnections)
         let sections = store.orderedConnections.map {
-            SidebarBuilder.build($0, org: org, query: query, starred: projects.starredFolders(on: $0.id), mirrors: mirrors, hits: content.hits(for: $0.id, query: query))
+            SidebarBuilder.build($0, org: org, query: query, projects: projects.sidebarProjects(on: $0.id), mirrors: mirrors, hits: content.hits(for: $0.id, query: query))
         }
         let place = SidebarBuilder.place(of: ref.sessionOnly, sections: sections, merged: SidebarBuilder.merge(sections, org: org))
         switch place?.area {

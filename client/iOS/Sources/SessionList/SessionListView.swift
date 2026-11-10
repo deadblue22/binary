@@ -26,7 +26,7 @@ struct SessionListView: View {
     var body: some View {
         let mirrors = MirrorIndex(store.orderedConnections)
         let sections = store.orderedConnections.map {
-            SidebarBuilder.build($0, org: org, query: query, starred: projects.starredFolders(on: $0.id), mirrors: mirrors, hits: content.hits(for: $0.id, query: query))
+            SidebarBuilder.build($0, org: org, query: query, projects: projects.sidebarProjects(on: $0.id), mirrors: mirrors, hits: content.hits(for: $0.id, query: query))
         }
         let merged = SidebarBuilder.merge(sections, org: org)
         List {
