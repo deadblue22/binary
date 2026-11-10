@@ -1,6 +1,6 @@
 DIST := $(CURDIR)/dist
 
-.PHONY: all server app ios test clean
+.PHONY: all server app ios update test clean
 
 all: server app
 
@@ -15,6 +15,10 @@ app:
 # The iOS app, for the simulator (needs Xcode and xcodegen); see the README for devices.
 ios:
 	client/scripts/build-ios.sh
+
+# Pull and rebuild what changed; restarts binaryd and Binary.app if they run from here.
+update:
+	scripts/update.sh
 
 test:
 	cd server && npm test
