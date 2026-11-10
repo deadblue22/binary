@@ -187,6 +187,26 @@ final class ProjectStore {
         projects.first { $0.server == server && ProjectGroup.folder(of: $0.folder) == folder }
     }
 
+    /// A folder as a new project, with the settings sessions there were last
+    /// started with.
+    func draft(server: UUID, folder: String) -> Project {
+        var p = Project(name: Project.defaultName(for: folder), server: server, folder: folder)
+        p.startConfig = config(for: StartTarget(server: server, folder: folder, project: nil))
+        return p
+    }
+
+    /// Stars or unstars a sidebar section's project; starring a folder that
+    /// isn't one saves it as a project.
+    func setStarred(server: UUID, section folder: String, _ on: Bool) {
+        if let p = project(server: server, section: folder) {
+            setStarred(p.id, on)
+        } else if on {
+            var p = draft(server: server, folder: folder)
+            p.starred = true
+            save(p)
+        }
+    }
+
     func projects(on server: UUID) -> [Project] {
         projects.filter { $0.server == server }
             .sorted { ($0.lastUsed ?? .distantPast, $1.name) > ($1.lastUsed ?? .distantPast, $0.name) }

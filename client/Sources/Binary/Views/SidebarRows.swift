@@ -227,6 +227,9 @@ struct ProjectHeader<MenuContent: View>: View {
     let collapsed: Bool
     /// Sessions with a turn running; shown while folded, as on servers.
     var busy = 0
+    /// nil: no star (Other Projects, sessions with no folder).
+    var starred: Bool? = nil
+    var onStar: (() -> Void)? = nil
     var onNew: (() -> Void)? = nil
     let onToggle: () -> Void
     @ViewBuilder let menu: () -> MenuContent
@@ -242,6 +245,17 @@ struct ProjectHeader<MenuContent: View>: View {
                 .foregroundStyle(theme.c.text)
                 .lineLimit(1)
             Spacer(minLength: 4)
+            if let starred, let onStar, hover || starred {
+                Button(action: onStar) {
+                    Image(systemName: starred ? "star.fill" : "star")
+                        .font(.system(size: theme.size(.small)))
+                        .foregroundStyle(starred ? theme.c.warning : theme.c.textFaint)
+                        .frame(width: 20, height: 20)
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .help(starred ? tr("Unstar") : tr("Star"))
+            }
             if let onNew {
                 AddButton(action: onNew, rowHover: hover)
                     .help(tr("New Session in \(name)"))
