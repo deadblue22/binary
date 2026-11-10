@@ -245,11 +245,13 @@ struct ProjectHeader<MenuContent: View>: View {
                 .foregroundStyle(theme.c.text)
                 .lineLimit(1)
             Spacer(minLength: 4)
-            if let starred, let onStar, hover || starred {
+            // Only on hover, and muted: where a section sits already says
+            // whether it's starred, and a star on every header is noise.
+            if let starred, let onStar, hover {
                 Button(action: onStar) {
                     Image(systemName: starred ? "star.fill" : "star")
                         .font(.system(size: theme.size(.small)))
-                        .foregroundStyle(starred ? theme.c.warning : theme.c.textFaint)
+                        .foregroundStyle(theme.c.textMuted)
                         .frame(width: 20, height: 20)
                         .contentShape(Rectangle())
                 }
