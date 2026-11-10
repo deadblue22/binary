@@ -151,6 +151,15 @@ final class ProjectStore {
         persistMemory()
     }
 
+    /// A place was picked for a new session, from the sidebar's + or the
+    /// project list: the next one starts there too, even if this one is
+    /// left without a message. Its settings are kept only once one is sent.
+    func rememberPlace(_ t: StartTarget) {
+        guard memory.last != t else { return }
+        memory.last = t
+        persistMemory()
+    }
+
     private static func key(_ t: StartTarget) -> String { "\(t.server.uuidString)|\(t.folder)" }
 
     private func persistMemory() {

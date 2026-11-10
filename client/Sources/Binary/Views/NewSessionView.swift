@@ -1,7 +1,7 @@
 import SwiftUI
 
-/// A blank session in the detail column. It starts in the project the last
-/// session was started in, with the settings last used there; the bar under
+/// A blank session in the detail column. It starts in the project last
+/// picked for a new session, with the settings last used there; the bar under
 /// the message box changes either until the first message is sent, which
 /// creates the session.
 struct NewSessionView: View {
@@ -105,6 +105,10 @@ struct NewSessionView: View {
         .onChange(of: text) { _, _ in composing = focused && ComposingWatcher.composing() }
         .onChange(of: nav.effortStep) { _, step in stepEffort(step.delta) }
         .task(id: target) { await loadGit() }
+        // A child starts in its parent's folder; that isn't a place picked.
+        .onChange(of: target) { _, t in
+            if let t, !t.folder.isEmpty, parent == nil { projects.rememberPlace(t) }
+        }
         .task {
             try? await Task.sleep(nanoseconds: 150_000_000)
             if !Task.isCancelled { focused = true }
