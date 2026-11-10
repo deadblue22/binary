@@ -568,3 +568,37 @@ final class ComposingWatcher {
     func remove() {}
 }
 #endif
+
+// MARK: - Screen room
+
+#if os(macOS)
+/// Where a view sits on its screen, read when asked. A popover from the
+/// composer bar uses it to open toward the side with room and to stay inside
+/// the screen's visible frame: AppKit places it against the whole screen, so
+/// a tall one runs under a Dock that isn't hidden.
+@MainActor
+final class ScreenAnchor {
+    fileprivate weak var view: NSView?
+
+    /// Points between the view and the top and bottom of the visible frame.
+    var room: (above: CGFloat, below: CGFloat)? {
+        guard let view, let window = view.window, let screen = window.screen else { return nil }
+        let rect = window.convertToScreen(view.convert(view.bounds, to: nil))
+        let visible = screen.visibleFrame
+        return (visible.maxY - rect.maxY, rect.minY - visible.minY)
+    }
+}
+
+extension View {
+    /// Lets `anchor` measure this view on screen.
+    func screenAnchor(_ anchor: ScreenAnchor) -> some View {
+        background(ScreenAnchorView(anchor: anchor))
+    }
+}
+
+private struct ScreenAnchorView: NSViewRepresentable {
+    let anchor: ScreenAnchor
+    func makeNSView(context: Context) -> NSView { NSView() }
+    func updateNSView(_ view: NSView, context: Context) { anchor.view = view }
+}
+#endif

@@ -12,6 +12,8 @@ struct ProjectPicker: View {
     /// The options button on a plain folder: save it as a project with its settings.
     var onEditFolder: ((UUID, String) -> Void)? = nil
     var onBrowse: ((UUID) -> Void)? = nil
+    /// The Mac's popover passes its room on screen; a sheet sizes itself.
+    var maxHeight: CGFloat? = nil
     @Environment(ServerStore.self) private var store
     @Environment(ProjectStore.self) private var projects
     @Environment(\.theme) private var theme

@@ -26,6 +26,12 @@ struct NewSessionView: View {
     @State private var creating = false
     @State private var error: String?
     @State private var picking = false
+    /// Which side of the project button the list opens on, and how tall it may be.
+    @State private var pickerEdge: Edge = .bottom
+    @State private var pickerHeight: CGFloat?
+    #if os(macOS)
+    @State private var pickerAnchor = ScreenAnchor()
+    #endif
     @State private var browsing = false
     /// Which server "Open Folder…" browses when it isn't the one in the composer.
     @State private var browseServer: UUID?
@@ -317,14 +323,17 @@ struct NewSessionView: View {
     }
 
     private var projectButton: some View {
-        Button { picking = true } label: {
+        Button { openPicker() } label: {
             ControlLabel(icon: config.worktree ? "square.stack.3d.up" : (project != nil ? "folder.fill" : "folder"),
                          text: project?.name ?? (folder.isEmpty ? tr("Choose a project…") : Project.defaultName(for: folder)))
         }
         .buttonStyle(.plain)
         .help(tr("Project (⌥⌘1…9 for starred ones)"))
         .disabled(conn == nil)
-        .popover(isPresented: $picking, arrowEdge: .bottom) {
+        #if os(macOS)
+        .screenAnchor(pickerAnchor)
+        #endif
+        .popover(isPresented: $picking, arrowEdge: pickerEdge) {
             if let conn {
                 ProjectPicker(server: conn.id, current: target, onPick: { t in
                     picking = false
@@ -344,12 +353,27 @@ struct NewSessionView: View {
                     picking = false
                     browseServer = server
                     browsing = true
-                })
+                }, maxHeight: pickerHeight)
                 .environment(store)
                 .environment(projects)
                 .environment(\.theme, theme)
             }
         }
+    }
+
+    private func openPicker() {
+        #if os(macOS)
+        // The bar sits at the bottom of the window, often right above the
+        // Dock: open below only when the whole list fits there, else on the
+        // roomier side, and cap the list at that room so recent folders
+        // arriving after it opens can't push it off the visible screen.
+        if let room = pickerAnchor.room {
+            let tallest: CGFloat = 560, arrow: CGFloat = 24
+            pickerEdge = room.below >= tallest + arrow || room.below >= room.above ? .bottom : .top
+            pickerHeight = (pickerEdge == .bottom ? room.below : room.above) - arrow
+        }
+        #endif
+        picking = true
     }
 
     private func branchMenu(_ showText: Bool) -> some View {
