@@ -609,6 +609,9 @@ final class ScreenPopover: NSObject, NSPopoverDelegate {
         self.onClose = onClose
         // The edge is in the view's own coordinates; this one isn't flipped.
         p.show(relativeTo: view.bounds, of: view, preferredEdge: below ? .minY : .maxY)
+        // Key from the start, so its search field takes typing and its
+        // shortcuts and the first click on a row reach it, not the window under it.
+        host.view.window?.makeKey()
     }
 
     func close() { popover?.performClose(nil) }

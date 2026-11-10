@@ -90,11 +90,11 @@ struct NewSessionView: View {
         .background {
             // ⌥⌘1…9 pick starred projects, ⌥⌘0 adds one, without opening the list.
             ForEach(0..<min(9, projects.favorites.count), id: \.self) { i in
-                Button("") { choose(projects.favorites[i]) }
+                Button("") { picking = false; choose(projects.favorites[i]) }
                     .keyboardShortcut(KeyEquivalent(Character("\(i + 1)")), modifiers: [.command, .option])
                     .hidden()
             }
-            Button("") { newProject() }.keyboardShortcut("0", modifiers: [.command, .option]).hidden()
+            Button("") { picking = false; newProject() }.keyboardShortcut("0", modifiers: [.command, .option]).hidden()
         }
         .navigationTitle(parent == nil ? tr("New Session") : tr("New Child Session"))
         #if os(macOS)
