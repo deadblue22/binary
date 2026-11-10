@@ -696,6 +696,8 @@ final class NativeLineCell: TranscriptCell {
     private var lineHeight: CGFloat = 0
     private var hover = false
     private var hoverColor = NSColor.clear
+    private var hoverTextColor = NSColor.clear
+    private var restingToolText: NSAttributedString?
     private var onOpen: () -> Void = {}
 
     init() {
@@ -733,7 +735,8 @@ final class NativeLineCell: TranscriptCell {
         self.inner = inner
         self.onOpen = onOpen
         lineHeight = line.height(theme: theme) - 2 * NativeLine.inset
-        hoverColor = NSColor(theme.c.hover).withAlphaComponent(0.6)
+        hoverColor = NSColor(theme.c.hover)
+        hoverTextColor = NSColor(theme.c.textMuted)
         let size = theme.size(.caption)
 
         switch line {
@@ -752,6 +755,7 @@ final class NativeLineCell: TranscriptCell {
             ]))
             text.addAttribute(.paragraphStyle, value: Self.middle, range: NSRange(location: 0, length: text.length))
             label.attributedStringValue = marks.search(id).apply(text)
+            restingToolText = label.attributedStringValue
             status.isHidden = false
             spinner.stopAnimation(nil)
             if let result {
@@ -767,6 +771,7 @@ final class NativeLineCell: TranscriptCell {
             }
             setAccessibilityLabel(ToolInfo.title(name) + " " + summary)
         case .thinking:
+            restingToolText = nil
             icon.image = Self.symbol("sparkle", size: size)
             icon.contentTintColor = NSColor(theme.c.textFaint)
             label.attributedStringValue = NSAttributedString(string: tr("Thinking"), attributes: [
@@ -777,7 +782,7 @@ final class NativeLineCell: TranscriptCell {
             setAccessibilityLabel(tr("Thinking"))
         }
         chevron.image = Self.symbol("chevron.right", size: max(9, theme.size(.small) - 1), weight: .semibold)
-        chevron.contentTintColor = NSColor(theme.c.textFaint)
+        chevron.contentTintColor = isTool ? hoverTextColor : NSColor(theme.c.textFaint)
         markLayer.backgroundColor = marks.marked(id) ? NSColor(theme.c.focus).withAlphaComponent(0.14).cgColor : nil
         hover = false
         updateHover()
@@ -856,15 +861,40 @@ final class NativeLineCell: TranscriptCell {
                                        owner: self, userInfo: nil))
     }
 
-    override func mouseEntered(with event: NSEvent) { hover = true; updateHover() }
-    override func mouseExited(with event: NSEvent) { hover = false; updateHover() }
+    override func mouseEntered(with event: NSEvent) {
+        hover = true
+        if let restingToolText {
+            let text = NSMutableAttributedString(attributedString: restingToolText)
+            let range = NSRange(location: 0, length: text.length)
+            restingToolText.enumerateAttribute(.backgroundColor, in: range) { background, run, _ in
+                if background == nil { text.addAttribute(.foregroundColor, value: hoverTextColor, range: run) }
+            }
+            label.attributedStringValue = text
+        }
+        updateHover()
+    }
+
+    override func mouseExited(with event: NSEvent) {
+        hover = false
+        if let restingToolText { label.attributedStringValue = restingToolText }
+        updateHover()
+    }
+
+    override func viewDidChangeEffectiveAppearance() {
+        super.viewDidChangeEffectiveAppearance()
+        updateHover()
+    }
 
     private func updateHover() {
         // Tool lines show their chevron and a highlight on hover; thinking always shows its chevron.
         chevron.isHidden = isTool && !hover
         CATransaction.begin()
         CATransaction.setDisableActions(true)
-        hoverLayer.backgroundColor = isTool && hover ? hoverColor.cgColor : nil
+        // Layer colors are static once converted to CGColor. Pointer events do
+        // not run in the view's drawing appearance.
+        effectiveAppearance.performAsCurrentDrawingAppearance {
+            hoverLayer.backgroundColor = isTool && hover ? hoverColor.cgColor.copy(alpha: 0.6) : nil
+        }
         CATransaction.commit()
     }
 
