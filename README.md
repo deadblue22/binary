@@ -58,6 +58,8 @@ Stop the running server before upgrading or rebuilding (`npm install` replaces d
 ./server/bin/binaryd service restart --when-idle
 ```
 
+To update from GitHub, `make update` does all of this: it pulls (fast-forward only), rebuilds `dist/Binary.app` if the client changed and binaryd if the server changed, restarts the service when it runs this checkout and that interrupts nothing (when dependencies changed, it waits for that before `npm install`), and quits and reopens Binary.app if it was running from `dist`. It only rebuilds what was built here before. If a step fails after the pull, fix it and run `make all`.
+
 A restart that does interrupt something gives running turns up to 30 seconds to end, and the next binaryd resumes what was still cut off, telling Claude so.
 
 ## Managing remote servers
