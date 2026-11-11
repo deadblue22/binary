@@ -219,7 +219,9 @@ struct ProjectPicker: View {
 
     private func star(_ it: Item) {
         switch it {
-        case .project(let p): projects.setStarred(p.id, !p.starred)
+        case .project(let p):
+            guard let current = projects.project(p.id) else { return }
+            projects.setStarred(current.id, !current.starred)
         case .folder(let f): starFolder(f)
         }
     }
