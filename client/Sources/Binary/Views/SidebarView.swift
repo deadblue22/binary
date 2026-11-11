@@ -38,7 +38,7 @@ struct SidebarView: View {
         }
         let merged = SidebarBuilder.merge(sections, org: org)
         let order = SidebarBuilder.visibleOrder(sections, merged: merged, org: org, showAll: showAllAgents)
-        VStack(spacing: 0) {
+        let sidebar = VStack(spacing: 0) {
             topBar(sections)
             ScrollViewReader { proxy in
                 ScrollView {
@@ -77,6 +77,8 @@ struct SidebarView: View {
             }
         }
         .background(theme.c.sidebar)
+
+        let observedSidebar = sidebar
         .onAppear { nav.visibleOrder = order }
         .onChange(of: order) { _, o in nav.visibleOrder = o }
         .onChange(of: nav.searchRequest) { _, _ in searchFocused = true }
@@ -111,6 +113,7 @@ struct SidebarView: View {
                 .help(tr("New Session (⌘N)"))
             }
         }
+        return observedSidebar
         .alert(prompt?.title ?? "", isPresented: Binding(get: { prompt != nil }, set: { if !$0 { prompt = nil } }), presenting: prompt) { p in
             TextField(p.placeholder, text: $promptText)
             Button(tr("Cancel"), role: .cancel) {}
