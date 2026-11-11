@@ -39,11 +39,17 @@ struct ProjectPicker: View {
                 ForEach(store.orderedConnections) { conn in
                     let own = projects.projects(on: conn.id).filter { !$0.starred && matches($0.name, $0.folder) }
                     let known = Set(projects.projects(on: conn.id).map(\.folder))
-                    let dirs = (recent[conn.id] ?? []).filter { !known.contains($0) && matches(Project.defaultName(for: $0), $0) }
-                    if !own.isEmpty || !dirs.isEmpty {
+                    let all = (recent[conn.id] ?? []).filter { !known.contains($0) && matches(Project.defaultName(for: $0), $0) }
+                    let dirs = projects.shownRecent(all, on: conn.id)
+                    if !own.isEmpty || !all.isEmpty {
                         Section {
                             ForEach(own) { p in projectRow(p) }
                             ForEach(dirs, id: \.self) { d in folderRow(conn.id, d) }
+                            if dirs.count < all.count {
+                                Button { projects.showHiddenRecent(on: conn.id) } label: {
+                                    Label(tr("Show \(all.count - dirs.count) hidden folders"), systemImage: "eye")
+                                }
+                            }
                         } header: {
                             Label(conn.displayName, systemImage: "server.rack")
                         }
@@ -129,6 +135,9 @@ struct ProjectPicker: View {
             .tint(theme.c.warning)
         }
         .swipeActions(edge: .trailing) {
+            Button(role: .destructive) { projects.hideRecent(server: server, folder: folder) } label: {
+                Label(tr("Remove from Recent"), systemImage: "eye.slash")
+            }
             if let onEditFolder {
                 Button { after { onEditFolder(server, folder) } } label: {
                     Label(tr("Save as Project…"), systemImage: "slider.horizontal.3")
