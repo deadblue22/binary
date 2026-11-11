@@ -175,9 +175,9 @@ struct QuestionCard: View {
                 if let h = q["header"]?.string {
                     Chip(text: h, tint: theme.c.warning)
                 }
-                Text(q["question"]?.string ?? "")
-                    .font(theme.font(.body).weight(.medium))
-                    .foregroundStyle(theme.c.text)
+                FlowText(text: Self.promptText(q["question"]?.string ?? "", theme: theme),
+                         linkColor: PlatformColor(theme.c.link))
+                    .frame(maxWidth: .infinity, alignment: .leading)
             }
             ForEach(Array((q["options"]?.array ?? []).enumerated()), id: \.offset) { _, opt in
                 let label = opt["label"]?.string ?? ""
@@ -224,6 +224,15 @@ struct QuestionCard: View {
                 if !multi, !v.isEmpty { picks[qi] = [] }
             }))
         }
+    }
+
+    /// Keep the prompt selectable and recognize bare URLs as well as Markdown links.
+    static func promptText(_ text: String, theme: Theme) -> NSAttributedString {
+        let paragraph = NSMutableParagraphStyle()
+        paragraph.lineSpacing = theme.lineSpacing
+        return MarkdownAttributed.inline(
+            text, theme: theme, size: theme.size(.body), color: PlatformColor(theme.c.text),
+            paragraph: paragraph, weight: .medium)
     }
 
     private var complete: Bool {
