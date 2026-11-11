@@ -26,7 +26,7 @@ struct SessionListView: View {
     var body: some View {
         let mirrors = MirrorIndex(store.orderedConnections)
         let sections = store.orderedConnections.map {
-            SidebarBuilder.build($0, org: org, query: query, starred: projects.starredFolders(on: $0.id), mirrors: mirrors, hits: content.hits(for: $0.id, query: query))
+            SidebarBuilder.build($0, org: org, query: query, projects: projects.sidebarProjects(on: $0.id), mirrors: mirrors, hits: content.hits(for: $0.id, query: query))
         }
         let merged = SidebarBuilder.merge(sections, org: org)
         List {
@@ -240,8 +240,12 @@ struct SessionListView: View {
     private func projectRows(_ p: ProjectGroup, conn: ServerConnection) -> some View {
         let toggle = { withAnimation(.easeOut(duration: 0.15)) { org.setProjectCollapsed(p.id, !p.collapsed) } }
         SectionTitle(icon: "folder", title: p.name, count: p.nodes.count, expanded: !p.collapsed, busy: p.busy, onToggle: toggle) {
-            Button { newSession(in: p) } label: { Label(tr("New Session in Project"), systemImage: "square.and.pencil") }
+            Button { newSession(in: p, conn: conn) } label: { Label(tr("New Session in Project"), systemImage: "square.and.pencil") }
             if !p.folder.isEmpty {
+                let starred = projects.project(server: conn.id, section: p.folder)?.starred == true
+                Button { projects.setStarred(server: conn.id, section: p.folder, !starred) } label: {
+                    Label(starred ? tr("Unstar") : tr("Star"), systemImage: starred ? "star.slash" : "star")
+                }
                 Button { copy(p.folder) } label: { Label(tr("Copy Path"), systemImage: "doc.on.doc") }
             }
             Divider()
@@ -254,6 +258,13 @@ struct SessionListView: View {
         .listRowBackground(Color.clear)
         .listRowSeparator(.hidden)
         if !p.collapsed {
+            if p.nodes.isEmpty {
+                Text(tr("No sessions"))
+                    .font(theme.font(.caption))
+                    .foregroundStyle(theme.c.textFaint)
+                    .listRowBackground(Color.clear)
+                    .listRowSeparator(.hidden)
+            }
             ForEach(p.nodes) { n in tree(n, conn: conn) }
         }
     }
@@ -274,9 +285,17 @@ struct SessionListView: View {
         }
     }
 
-    /// A project's New Session: in its folder.
-    private func newSession(in p: ProjectGroup) {
-        let latest = p.nodes.max { $0.session.updatedAt < $1.session.updatedAt }?.ref
+    /// A project's New Session: in its folder. A starred project with no
+    /// sessions has none to take the server from, so it becomes the place
+    /// new sessions start instead.
+    private func newSession(in p: ProjectGroup, conn: ServerConnection) {
+        guard let latest = p.nodes.max(by: { $0.session.updatedAt < $1.session.updatedAt })?.ref else {
+            if let saved = projects.project(server: conn.id, section: p.folder) {
+                projects.rememberPlace(StartTarget(server: conn.id, folder: saved.folder, project: saved.id))
+            }
+            nav.newSession()
+            return
+        }
         nav.newSession(template: latest, folder: p.folder.isEmpty ? nil : p.folder)
     }
 

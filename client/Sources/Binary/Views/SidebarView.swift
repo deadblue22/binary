@@ -21,11 +21,20 @@ struct SidebarView: View {
     @State private var notice: String?
     /// Sessions whose whole subagent list is open.
     @State private var showAllAgents: Set<SessionRef> = []
+    /// The project editor opened from a project's menu.
+    @State private var editing: ProjectEdit?
+    @State private var deleting: Project?
+
+    private struct ProjectEdit: Identifiable {
+        let project: Project
+        let isNew: Bool
+        var id: UUID { project.id }
+    }
 
     var body: some View {
         let mirrors = MirrorIndex(store.orderedConnections)
         let sections = store.orderedConnections.map {
-            SidebarBuilder.build($0, org: org, query: query, starred: projects.starredFolders(on: $0.id), mirrors: mirrors, hits: content.hits(for: $0.id, query: query))
+            SidebarBuilder.build($0, org: org, query: query, projects: projects.sidebarProjects(on: $0.id), mirrors: mirrors, hits: content.hits(for: $0.id, query: query))
         }
         let merged = SidebarBuilder.merge(sections, org: org)
         let order = SidebarBuilder.visibleOrder(sections, merged: merged, org: org, showAll: showAllAgents)
@@ -108,6 +117,16 @@ struct SidebarView: View {
             Button(p.confirm) { commit(p, promptText.trimmingCharacters(in: .whitespacesAndNewlines)) }
         } message: { p in
             if let m = p.message { Text(m) }
+        }
+        .sheet(item: $editing) { req in
+            ProjectEditor(draft: req.project, isNew: req.isNew, onSave: { projects.save($0) },
+                          onDelete: req.isNew ? nil : { projects.delete(req.project.id) })
+        }
+        .alert(tr("Delete this project?"), isPresented: Binding(get: { deleting != nil }, set: { if !$0 { deleting = nil } }), presenting: deleting) { p in
+            Button(tr("Cancel"), role: .cancel) {}
+            Button(tr("Delete"), role: .destructive) { projects.delete(p.id) }
+        } message: { _ in
+            Text(tr("Only the saved project is removed; the folder and its sessions stay."))
         }
     }
 
@@ -410,11 +429,21 @@ struct SidebarView: View {
     @ViewBuilder
     private func projectView(_ p: ProjectGroup, conn: ServerConnection) -> some View {
         let toggle = { org.setProjectCollapsed(p.id, !p.collapsed) }
+        let saved = projects.project(server: conn.id, section: p.folder)
+        let starred = saved?.starred == true
         ProjectHeader(name: p.name, folder: p.folder, count: p.nodes.count, collapsed: p.collapsed, busy: p.busy,
-                      onNew: { newSession(in: p) }, onToggle: toggle) {
-            Button(tr("New Session in Project")) { newSession(in: p) }
+                      starred: p.folder.isEmpty ? nil : starred, onStar: { projects.setStarred(server: conn.id, section: p.folder, !starred) },
+                      onNew: { newSession(in: p, conn: conn) }, onToggle: toggle) {
+            Button(tr("New Session in Project")) { newSession(in: p, conn: conn) }
             Divider()
             if !p.folder.isEmpty {
+                Button(starred ? tr("Unstar") : tr("Star")) { projects.setStarred(server: conn.id, section: p.folder, !starred) }
+                if let saved {
+                    Button(tr("Edit Project…")) { editing = ProjectEdit(project: saved, isNew: false) }
+                } else {
+                    Button(tr("Save as Project…")) { editing = ProjectEdit(project: projects.draft(server: conn.id, folder: p.folder), isNew: true) }
+                }
+                Divider()
                 Button(tr("Copy Path")) { copy(p.folder) }
                 if conn.isLocal {
                     Button(tr("Show in Finder")) { NSWorkspace.shared.selectFile(nil, inFileViewerRootedAtPath: p.folder) }
@@ -424,8 +453,15 @@ struct SidebarView: View {
             Button(p.collapsed ? tr("Expand") : tr("Collapse"), action: toggle)
             Divider()
             Button(tr("Archive Project's Sessions")) { archive(p, conn) }
+            if let saved {
+                Button(tr("Delete Saved Project…")) { deleting = saved }
+            }
         }
         if !p.collapsed {
+            if p.nodes.isEmpty {
+                emptyLine(tr("No sessions yet. + starts one."))
+                    .padding(.leading, 22)
+            }
             ForEach(p.nodes) { n in tree(n, conn: conn) }
         }
     }
@@ -456,9 +492,17 @@ struct SidebarView: View {
         notice = tr("Archived \(refs.count) sessions of \(p.name). Show → Archived lists them.")
     }
 
-    /// + on a project: a new session in its folder.
-    private func newSession(in p: ProjectGroup) {
-        let latest = p.nodes.max { $0.session.updatedAt < $1.session.updatedAt }?.ref
+    /// + on a project: a new session in its folder. A starred project with
+    /// no sessions has none to take the server from, so it becomes the place
+    /// new sessions start instead.
+    private func newSession(in p: ProjectGroup, conn: ServerConnection) {
+        guard let latest = p.nodes.max(by: { $0.session.updatedAt < $1.session.updatedAt })?.ref else {
+            if let saved = projects.project(server: conn.id, section: p.folder) {
+                projects.rememberPlace(StartTarget(server: conn.id, folder: saved.folder, project: saved.id))
+            }
+            nav.newSession()
+            return
+        }
         nav.newSession(template: latest, folder: p.folder.isEmpty ? nil : p.folder)
     }
 
@@ -579,7 +623,7 @@ struct SidebarView: View {
         // pinned or grouped apart from its parent isn't under that parent.
         let mirrors = MirrorIndex(store.orderedConnections)
         let sections = store.orderedConnections.map {
-            SidebarBuilder.build($0, org: org, query: query, starred: projects.starredFolders(on: $0.id), mirrors: mirrors, hits: content.hits(for: $0.id, query: query))
+            SidebarBuilder.build($0, org: org, query: query, projects: projects.sidebarProjects(on: $0.id), mirrors: mirrors, hits: content.hits(for: $0.id, query: query))
         }
         let place = SidebarBuilder.place(of: ref.sessionOnly, sections: sections, merged: SidebarBuilder.merge(sections, org: org))
         switch place?.area {
