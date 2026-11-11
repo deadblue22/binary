@@ -578,14 +578,31 @@ final class ComposingWatcher {
 /// overlapped the button and ran off the bottom whatever `arrowEdge` said.
 @MainActor
 final class ScreenPopover: NSObject, NSPopoverDelegate {
-    fileprivate weak var view: NSView?
+    /// Every copy of the view it opens from that is in a window.
+    fileprivate let anchors = NSHashTable<NSView>.weakObjects()
     private var popover: NSPopover?
     private var onClose: (() -> Void)?
 
-    /// Points between the view and the top and bottom of the screen's
+    /// The copy of the view on screen. A bar laid out by ViewThatFits holds
+    /// two, both in the window, and changing the server rebuilds them in
+    /// either order: the one the click landed in is the one shown.
+    private var view: NSView? {
+        let shown = anchors.allObjects.filter {
+            $0.window != nil && !$0.isHiddenOrHasHiddenAncestor && !$0.visibleRect.isEmpty
+        }
+        if let event = NSApp.currentEvent, event.type == .leftMouseDown || event.type == .leftMouseUp,
+           let hit = shown.first(where: {
+               $0.window == event.window && $0.bounds.contains($0.convert(event.locationInWindow, from: nil))
+           }) {
+            return hit
+        }
+        return shown.first ?? anchors.allObjects.first { $0.window != nil }
+    }
+
+    /// Points between `view` and the top and bottom of the screen's
     /// visible frame, which leaves out the menu bar and the Dock.
-    var room: (above: CGFloat, below: CGFloat)? {
-        guard let view, let window = view.window, let screen = window.screen else { return nil }
+    private func space(around view: NSView) -> (above: CGFloat, below: CGFloat)? {
+        guard let window = view.window, let screen = window.screen else { return nil }
         let rect = window.convertToScreen(view.convert(view.bounds, to: nil))
         let visible = screen.visibleFrame
         return (visible.maxY - rect.maxY, rect.minY - visible.minY)
@@ -596,7 +613,7 @@ final class ScreenPopover: NSObject, NSPopoverDelegate {
     func show<Content: View>(tallest: CGFloat, onClose: @escaping () -> Void,
                              content: (CGFloat) -> Content) {
         guard popover == nil else { return }
-        guard let view, let room else { onClose(); return }
+        guard let view, let room = space(around: view) else { onClose(); return }
         let arrow: CGFloat = 24
         let below = room.below >= tallest + arrow || room.below >= room.above
         let host = NSHostingController(rootView: content((below ? room.below : room.above) - arrow))
@@ -649,9 +666,7 @@ final class AnchorNSView: NSView {
 
     override func viewDidMoveToWindow() {
         super.viewDidMoveToWindow()
-        // A bar laid out by ViewThatFits can hold two copies of the button:
-        // the one on screen is the one that has a window.
-        if window != nil { popover.view = self }
+        if window != nil { popover.anchors.add(self) } else { popover.anchors.remove(self) }
     }
 }
 #endif
