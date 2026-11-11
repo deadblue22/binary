@@ -622,8 +622,9 @@ struct UserMessageView: View {
                         }
                     }
                     .scrollIndicators(.never)
-                    .frame(maxHeight: h)
-                    .fixedSize(horizontal: false, vertical: true)
+                    // The table caches row heights before remote images load.
+                    // Reserve the strip's height so loading cannot clip the text below.
+                    .frame(height: h)
                 }
                 if !text.isEmpty {
                     VStack(alignment: .leading, spacing: 8) {
