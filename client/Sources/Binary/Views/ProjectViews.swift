@@ -3,6 +3,9 @@ import SwiftUI
 // MARK: - Picker
 
 /// Projects and recent folders on the server selected in the composer.
+/// ↑↓ move through them while the search field has focus, ↩ picks, ⌘S
+/// stars, ⌘E edits, and ⌘⌫ removes a recent folder from the list; each
+/// row's context menu does the same.
 struct ProjectPicker: View {
     let server: UUID
     let current: StartTarget?
@@ -19,16 +22,57 @@ struct ProjectPicker: View {
     @Environment(\.theme) private var theme
     @State private var query = ""
     @State private var recent: [UUID: [String]] = [:]
+    /// The row ↑↓ moved to, by `Item.id`; ↩ picks it.
+    @State private var cursor: String?
     /// The search field and the buttons under the list, as laid out.
     @State private var searchHeight: CGFloat = 40
     @State private var footerHeight: CGFloat = 70
     @FocusState private var searchFocused: Bool
+
+    /// A row of the list.
+    private enum Item {
+        case project(Project)
+        case folder(String)
+
+        var id: String {
+            switch self {
+            case .project(let p): return p.id.uuidString
+            case .folder(let f): return "folder|" + f
+            }
+        }
+    }
+
+    /// What the list shows on the server for the search, in order.
+    private struct Listing {
+        var favs: [Project] = []
+        var rest: [Project] = []
+        var dirs: [String] = []
+        /// Matching recent folders removed from the list.
+        var hidden = 0
+        var items: [Item] { favs.map(Item.project) + rest.map(Item.project) + dirs.map(Item.folder) }
+    }
 
     private var q: String { query.trimmingCharacters(in: .whitespaces).lowercased() }
     private var conn: ServerConnection? { store.connection(server) }
 
     private func matches(_ name: String, _ folder: String) -> Bool {
         q.isEmpty || name.lowercased().contains(q) || folder.lowercased().contains(q)
+    }
+
+    private var listing: Listing {
+        guard let conn else { return Listing() }
+        let all = projects.projects(on: conn.id)
+        let known = Set(all.map(\.folder))
+        let dirs = (recent[conn.id] ?? []).filter { !known.contains($0) && matches(Project.defaultName(for: $0), $0) }
+        let shown = projects.shownRecent(dirs, on: conn.id)
+        return Listing(favs: all.filter { $0.starred && matches($0.name, $0.folder) },
+                       rest: all.filter { !$0.starred && matches($0.name, $0.folder) },
+                       dirs: shown, hidden: dirs.count - shown.count)
+    }
+
+    private var highlighted: Item? {
+        guard let cursor else { return nil }
+        return listing.items.first { $0.id == cursor }
     }
 
     /// The list scrolls past this, so the picker fits in `maxHeight`.
@@ -38,26 +82,35 @@ struct ProjectPicker: View {
     }
 
     var body: some View {
+        let list = listing
         VStack(spacing: 0) {
             HStack(spacing: 6) {
                 Image(systemName: "magnifyingglass").foregroundStyle(theme.c.textFaint)
                 PlainField(placeholder: tr("Search projects and folders…"),
                            text: $query, focus: $searchFocused)
                     .foregroundStyle(theme.c.text)
+                    .onSubmit { highlighted.map(choose) }
+                    .onKeyPress(.downArrow) { move(1) }
+                    .onKeyPress(.upArrow) { move(-1) }
             }
             .font(theme.font(.callout))
             .padding(.horizontal, 12)
             .padding(.vertical, 10)
             .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { searchHeight = $0 }
             Rectangle().fill(theme.c.border).frame(height: 1)
-            ScrollView {
-                VStack(alignment: .leading, spacing: 0) {
-                    if let conn {
-                        folders(conn)
+            ScrollViewReader { proxy in
+                ScrollView {
+                    VStack(alignment: .leading, spacing: 0) {
+                        if let conn {
+                            folders(conn, list)
+                        }
                     }
+                    .padding(.vertical, 4)
+                    .slimScrollers()
                 }
-                .padding(.vertical, 4)
-                .slimScrollers()
+                .onChange(of: cursor) { _, id in
+                    if let id { proxy.scrollTo(id) }
+                }
             }
             .frame(maxHeight: listLimit)
             .fixedSize(horizontal: false, vertical: true)
@@ -85,8 +138,16 @@ struct ProjectPicker: View {
                 }
             }
             Button("") { onNew(conn?.id) }.keyboardShortcut("0", modifiers: [.command, .option]).hidden()
+            // On the row ↑↓ moved to. Disabled without one, so ⌘⌫ still
+            // edits the search text.
+            let item = highlighted
+            Button("") { item.map(star) }.keyboardShortcut("s", modifiers: .command).disabled(item == nil).hidden()
+            Button("") { item.map(edit) }.keyboardShortcut("e", modifiers: .command).disabled(!canEdit(item)).hidden()
+            Button("") { item.map(remove) }.keyboardShortcut(.delete, modifiers: .command).disabled(!canRemove(item)).hidden()
         }
         .onAppear { searchFocused = true }
+        // While searching, ↩ picks the first match.
+        .onChange(of: q) { _, q in cursor = q.isEmpty ? nil : listing.items.first?.id }
         .task(id: server) {
             if let conn, conn.status == .online {
                 recent[server] = (try? await conn.recentDirs()) ?? []
@@ -96,28 +157,29 @@ struct ProjectPicker: View {
 
     /// The folder step: one server's projects, then folders used recently.
     @ViewBuilder
-    private func folders(_ c: ServerConnection) -> some View {
-        let all = projects.projects(on: c.id)
-        let favs = all.filter { $0.starred && matches($0.name, $0.folder) }
-        let rest = all.filter { !$0.starred && matches($0.name, $0.folder) }
-        let known = Set(all.map(\.folder))
-        let dirs = (recent[c.id] ?? []).filter { !known.contains($0) && matches(Project.defaultName(for: $0), $0) }
-        if !favs.isEmpty {
+    private func folders(_ c: ServerConnection, _ list: Listing) -> some View {
+        if !list.favs.isEmpty {
             header(tr("Starred"))
-            ForEach(favs) { p in projectRow(p, shortcut: shortcutNumber(p).map { "⌥⌘\($0)" }) }
+            ForEach(list.favs) { p in projectRow(p, shortcut: shortcutNumber(p).map { "⌥⌘\($0)" }) }
             divider
         }
-        if !rest.isEmpty {
+        if !list.rest.isEmpty {
             header(tr("Projects"))
-            ForEach(rest) { p in projectRow(p, shortcut: shortcutNumber(p).map { "⌥⌘\($0)" }) }
+            ForEach(list.rest) { p in projectRow(p, shortcut: shortcutNumber(p).map { "⌥⌘\($0)" }) }
             divider
         }
-        if !dirs.isEmpty {
+        if !list.dirs.isEmpty {
             header(tr("Recent"))
-            ForEach(dirs, id: \.self) { d in folderRow(c.id, d) }
+            ForEach(list.dirs, id: \.self) { d in folderRow(c.id, d) }
             divider
         }
-        if favs.isEmpty && rest.isEmpty && dirs.isEmpty {
+        if list.hidden > 0 {
+            PickerRow(icon: "eye", title: tr("Show \(list.hidden) hidden folders")) {
+                projects.showHiddenRecent(on: c.id)
+            }
+            divider
+        }
+        if list.favs.isEmpty && list.rest.isEmpty && list.dirs.isEmpty && list.hidden == 0 {
             Text(q.isEmpty ? tr("No projects yet. Add one below, or pick a folder.")
                            : tr("No matching projects or folders."))
                 .font(theme.font(.caption))
@@ -134,6 +196,88 @@ struct ProjectPicker: View {
 
     private func pick(_ p: Project) {
         onPick(StartTarget(server: p.server, folder: p.folder, project: p.id))
+    }
+
+    // MARK: Actions on a row
+
+    private func move(_ step: Int) -> KeyPress.Result {
+        // An input method uses the arrows while composing.
+        guard !ComposingWatcher.composing() else { return .ignored }
+        let items = listing.items
+        guard !items.isEmpty else { return .handled }
+        let i = items.firstIndex { $0.id == cursor }.map { $0 + step } ?? (step > 0 ? 0 : items.count - 1)
+        cursor = items[max(0, min(items.count - 1, i))].id
+        return .handled
+    }
+
+    private func choose(_ it: Item) {
+        switch it {
+        case .project(let p): pick(p)
+        case .folder(let f): onPick(StartTarget(server: server, folder: f, project: nil))
+        }
+    }
+
+    private func star(_ it: Item) {
+        switch it {
+        case .project(let p):
+            guard let current = projects.project(p.id) else { return }
+            projects.setStarred(current.id, !current.starred)
+        case .folder(let f): starFolder(f)
+        }
+    }
+
+    /// Starring a recent folder saves it as a project.
+    private func starFolder(_ folder: String) {
+        var p = Project(name: Project.defaultName(for: folder), server: server, folder: folder)
+        p.starred = true
+        projects.save(p)
+    }
+
+    private func canEdit(_ it: Item?) -> Bool {
+        switch it {
+        case .project?: return true
+        case .folder?: return onEditFolder != nil
+        case nil: return false
+        }
+    }
+
+    private func edit(_ it: Item) {
+        switch it {
+        case .project(let p): onEdit(p)
+        case .folder(let f): onEditFolder?(server, f)
+        }
+    }
+
+    private func canRemove(_ it: Item?) -> Bool {
+        if case .folder? = it { return true }
+        return false
+    }
+
+    /// Removes a recent folder from the list; ↑↓ carry on from the next row.
+    private func remove(_ it: Item) {
+        guard case .folder(let f) = it else { return }
+        let items = listing.items
+        if cursor == it.id, let i = items.firstIndex(where: { $0.id == it.id }) {
+            let next = items.indices.contains(i + 1) ? i + 1 : i - 1
+            cursor = items.indices.contains(next) ? items[next].id : nil
+        }
+        projects.hideRecent(server: server, folder: f)
+    }
+
+    @ViewBuilder
+    private func menu(_ it: Item) -> some View {
+        switch it {
+        case .project(let p):
+            Button(tr("Edit Project…")) { onEdit(p) }
+            Button(p.starred ? tr("Unstar") : tr("Star")) { star(it) }
+        case .folder:
+            if onEditFolder != nil {
+                Button(tr("Save as Project…")) { edit(it) }
+            }
+            Button(tr("Star")) { star(it) }
+            Divider()
+            Button(tr("Remove from Recent")) { remove(it) }
+        }
     }
 
     private func header(_ text: String, icon: String? = nil) -> some View {
@@ -153,33 +297,37 @@ struct ProjectPicker: View {
     }
 
     private func projectRow(_ p: Project, shortcut: String?) -> some View {
-        PickerRow(icon: p.worktree ? "square.stack.3d.up" : "folder",
-                  title: p.name,
-                  subtitle: [Format.path(p.folder, cwd: nil), p.branch, p.worktree ? "worktree" : nil].compactMap { $0 }.joined(separator: " · "),
-                  shortcut: shortcut,
-                  checked: current?.project == p.id,
-                  starred: p.starred,
-                  onStar: { projects.setStarred(p.id, !p.starred) },
-                  onEdit: { onEdit(p) }) {
+        let it = Item.project(p)
+        return PickerRow(icon: p.worktree ? "square.stack.3d.up" : "folder",
+                         title: p.name,
+                         subtitle: [Format.path(p.folder, cwd: nil), p.branch, p.worktree ? "worktree" : nil].compactMap { $0 }.joined(separator: " · "),
+                         shortcut: shortcut,
+                         checked: current?.project == p.id,
+                         highlighted: cursor == it.id,
+                         starred: p.starred,
+                         onStar: { star(it) },
+                         onEdit: { onEdit(p) }) {
             pick(p)
         }
+        .id(it.id)
+        .contextMenu { menu(it) }
     }
 
     private func folderRow(_ server: UUID, _ folder: String) -> some View {
-        PickerRow(icon: "clock",
-                  title: Project.defaultName(for: folder),
-                  subtitle: Format.path(folder, cwd: nil),
-                  checked: current?.project == nil && current?.folder == folder && current?.server == server,
-                  starred: false,
-                  onStar: {
-                      // Starring a recent folder saves it as a project.
-                      var p = Project(name: Project.defaultName(for: folder), server: server, folder: folder)
-                      p.starred = true
-                      projects.save(p)
-                  },
-                  onEdit: onEditFolder.map { f in { f(server, folder) } }) {
+        let it = Item.folder(folder)
+        return PickerRow(icon: "clock",
+                         title: Project.defaultName(for: folder),
+                         subtitle: Format.path(folder, cwd: nil),
+                         checked: current?.project == nil && current?.folder == folder && current?.server == server,
+                         highlighted: cursor == it.id,
+                         starred: false,
+                         onStar: { star(it) },
+                         onEdit: onEditFolder.map { f in { f(server, folder) } },
+                         onRemove: { remove(it) }) {
             onPick(StartTarget(server: server, folder: folder, project: nil))
         }
+        .id(it.id)
+        .contextMenu { menu(it) }
     }
 }
 
@@ -189,9 +337,13 @@ struct PickerRow: View {
     var subtitle: String? = nil
     var shortcut: String? = nil
     var checked = false
+    /// Moved to with ↑↓.
+    var highlighted = false
     var starred: Bool? = nil
     var onStar: (() -> Void)? = nil
     var onEdit: (() -> Void)? = nil
+    /// Takes a recent folder out of the list.
+    var onRemove: (() -> Void)? = nil
     let action: () -> Void
     @Environment(\.theme) private var theme
     @State private var hover = false
@@ -221,6 +373,11 @@ struct PickerRow: View {
                     .font(.system(size: theme.size(.caption), weight: .semibold))
                     .foregroundStyle(theme.c.focus)
             }
+            if let onRemove, hover {
+                Button(action: onRemove) { Image(systemName: "xmark") }
+                    .buttonStyle(.icon(size: 22))
+                    .help(tr("Remove from Recent (⌘⌫)"))
+            }
             if let onEdit, hover {
                 Button(action: onEdit) { Image(systemName: "slider.horizontal.3") }
                     .buttonStyle(.icon(size: 22))
@@ -244,7 +401,7 @@ struct PickerRow: View {
         .padding(.horizontal, 14)
         .padding(.vertical, 5)
         .background(RoundedRectangle(cornerRadius: theme.rowRadius, style: .continuous)
-            .fill(hover ? theme.c.hover : .clear)
+            .fill(hover || highlighted ? theme.c.hover : .clear)
             .padding(.horizontal, 6))
         .contentShape(Rectangle())
         .onTapGesture(perform: action)

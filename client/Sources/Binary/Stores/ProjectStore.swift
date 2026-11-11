@@ -97,6 +97,17 @@ struct StartConfig: Codable, Hashable, Sendable {
 private struct StartMemory: Codable {
     var last: StartTarget?
     var folders: [String: StartConfig] = [:]
+    /// Recent folders removed from the project list, as `ProjectStore.key`.
+    var hidden: [String] = []
+
+    init() {}
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        last = try c.decodeIfPresent(StartTarget.self, forKey: .last)
+        folders = try c.decodeIfPresent([String: StartConfig].self, forKey: .folders) ?? [:]
+        hidden = try c.decodeIfPresent([String].self, forKey: .hidden) ?? []
+    }
 }
 
 /// projects.json next to servers.json, a copy of what the servers keep;
@@ -147,6 +158,8 @@ final class ProjectStore {
         } else {
             memory.folders[Self.key(t)] = c
         }
+        // A folder sessions start in again is back in the list.
+        memory.hidden.removeAll { $0 == Self.key(t) }
         memory.last = t
         persistMemory()
     }
@@ -160,7 +173,34 @@ final class ProjectStore {
         persistMemory()
     }
 
-    private static func key(_ t: StartTarget) -> String { "\(t.server.uuidString)|\(t.folder)" }
+    private static func key(_ t: StartTarget) -> String { key(t.server, t.folder) }
+    private static func key(_ server: UUID, _ folder: String) -> String { "\(server.uuidString)|\(folder)" }
+
+    // MARK: Recent folders
+
+    /// The server's recent folders minus those removed from the list on this
+    /// client.
+    func shownRecent(_ dirs: [String], on server: UUID) -> [String] {
+        let hidden = Set(memory.hidden)
+        return dirs.filter { !hidden.contains(Self.key(server, $0)) }
+    }
+
+    /// Takes a recent folder out of the project list on this client, until
+    /// it's shown again or a session starts there.
+    func hideRecent(server: UUID, folder: String) {
+        let k = Self.key(server, folder)
+        guard !memory.hidden.contains(k) else { return }
+        memory.hidden.append(k)
+        persistMemory()
+    }
+
+    /// Puts the server's removed recent folders back in the list.
+    func showHiddenRecent(on server: UUID) {
+        let prefix = server.uuidString + "|"
+        guard memory.hidden.contains(where: { $0.hasPrefix(prefix) }) else { return }
+        memory.hidden.removeAll { $0.hasPrefix(prefix) }
+        persistMemory()
+    }
 
     private func persistMemory() {
         guard let data = try? JSONEncoder().encode(memory) else { return }
