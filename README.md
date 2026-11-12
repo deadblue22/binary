@@ -38,6 +38,8 @@ make all
 
 `make server` runs `npm install` for the official Agent SDK, which bundles an official Claude Code matching the SDK version (about 220MB, installed per platform). binaryd uses it by default, sharing the same login and `~/.claude` configuration as the `claude` in your terminal. To use your own `claude` instead, set `claudePath` in `server.json`.
 
+The SDK version is pinned in `server/package.json` and `server/package-lock.json`; updating the terminal's Claude does not update this bundled copy. Dependabot checks for SDK releases every Monday at 09:00 Asia/Tokyo and opens an update PR. Server tests run on the PR; review and merge it, then run `make update` on each host to deploy it. Updates are not automatically merged or installed into a running server. For a manual SDK update, stop the server after `binaryd wait-idle`, run `cd server && npm install --save-exact @anthropic-ai/claude-agent-sdk@latest && npm test`, then restart the service and commit both package files.
+
 The first run creates `~/.binary/server.json` (with a random token, mode 0600). Then open the client:
 
 ```bash
