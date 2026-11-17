@@ -20,7 +20,11 @@ struct ComposerView: View {
     @State private var drafts: [String: (text: String, images: [PendingImage])] = [:]
     /// Just queued and maybe not in the summary yet, shown for a few seconds.
     @State private var justQueued: [QueuedMessage] = []
+    #if os(macOS)
+    @State private var focused = false
+    #else
     @FocusState private var focused: Bool
+    #endif
 
     private var summary: SessionSummary? { controller.summary }
     private var busy: Bool { summary?.status.isBusy == true }

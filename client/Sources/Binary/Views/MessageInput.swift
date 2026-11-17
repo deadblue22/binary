@@ -5,7 +5,7 @@ import AppKit
 /// A scrolling editor avoids TextField's full-string cell-size calculation on each edit.
 struct MessageInput: NSViewRepresentable {
     @Binding var text: String
-    var focused: FocusState<Bool>.Binding
+    @Binding var focused: Bool
     var onSubmit: () -> Void
     var label: String = ""
     @Environment(\.theme) private var theme
@@ -31,7 +31,7 @@ struct MessageInput: NSViewRepresentable {
         editor.textContainer?.widthTracksTextView = true
         editor.delegate = context.coordinator
         editor.onFocusChange = { [weak coordinator = context.coordinator] focused in
-            DispatchQueue.main.async { coordinator?.parent.focused.wrappedValue = focused }
+            DispatchQueue.main.async { coordinator?.parent.focused = focused }
         }
         scroll.documentView = editor
         return scroll
@@ -58,9 +58,9 @@ struct MessageInput: NSViewRepresentable {
             editor.undoManager?.removeAllActions()
         }
         editor.setAccessibilityLabel(label)
-        if focused.wrappedValue, let window = editor.window, window.firstResponder !== editor {
+        if focused, editor.window?.firstResponder !== editor {
             DispatchQueue.main.async { [weak editor, weak coordinator = context.coordinator] in
-                guard let editor, coordinator?.parent.focused.wrappedValue == true else { return }
+                guard let editor, coordinator?.parent.focused == true else { return }
                 editor.window?.makeFirstResponder(editor)
             }
         }

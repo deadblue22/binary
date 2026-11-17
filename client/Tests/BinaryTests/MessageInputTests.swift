@@ -11,7 +11,7 @@ final class MessageInputTests: XCTestCase {
         var submissions = 0
         struct Harness: View {
             @Binding var text: String
-            @FocusState var focused: Bool
+            @State var focused = true
             var submit: () -> Void
             var body: some View {
                 MessageInput(text: $text, focused: $focused, onSubmit: submit)
@@ -30,7 +30,8 @@ final class MessageInputTests: XCTestCase {
             return view.subviews.compactMap(find).first
         }
         guard let editor = find(host) else { return XCTFail("Missing message editor") }
-        window.makeFirstResponder(editor)
+        RunLoop.main.run(until: Date().addingTimeInterval(0.05))
+        XCTAssertTrue(window.firstResponder === editor, "New composers must receive keyboard focus")
         let shortHeight = editor.inputHeight(width: 600)
         let pasted = String(repeating: "这是一段中文 English text，用于复现粘贴后的输入框卡顿。\n", count: 500)
         // Use a private pasteboard so the user's clipboard is left intact.

@@ -38,7 +38,11 @@ struct NewSessionView: View {
     @State private var dropTarget = false
     @State private var composing = false
     @State private var composingWatcher = ComposingWatcher()
+    #if os(macOS)
+    @State private var focused = false
+    #else
     @FocusState private var focused: Bool
+    #endif
 
     private struct EditRequest: Identifiable {
         let project: Project
