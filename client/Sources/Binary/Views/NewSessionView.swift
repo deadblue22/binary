@@ -227,6 +227,9 @@ struct NewSessionView: View {
                             .allowsHitTesting(false)
                             .accessibilityHidden(true)
                     }
+                    #if os(macOS)
+                    MessageInput(text: $drafts.newSessionText, focused: $focused, onSubmit: create, label: tr("What should Claude do?"))
+                    #else
                     TextField("", text: $drafts.newSessionText, axis: .vertical)
                         .textFieldStyle(.plain)
                         .font(theme.font(.body))
@@ -236,6 +239,7 @@ struct NewSessionView: View {
                         .focused($focused)
                         .onSubmit(create)
                         .shiftReturnNewline(when: focused)
+                    #endif
                 }
                 .padding(.vertical, 5)
                 Button(action: create) {

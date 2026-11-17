@@ -80,6 +80,9 @@ struct ComposerView: View {
                             .allowsHitTesting(false)
                             .accessibilityHidden(true)
                     }
+                    #if os(macOS)
+                    MessageInput(text: $text, focused: $focused, onSubmit: submit, label: placeholder)
+                    #else
                     TextField("", text: $text, axis: .vertical)
                         .textFieldStyle(.plain)
                         .font(theme.font(.body))
@@ -90,6 +93,7 @@ struct ComposerView: View {
                         .onSubmit(submit)
                         .shiftReturnNewline(when: focused)
                         .accessibilityLabel(placeholder)
+                    #endif
                 }
                 .padding(.vertical, 5)
                 if busy {
