@@ -259,8 +259,11 @@ final class ServerConnection: Identifiable {
         guard supportsSubagents, let api else { return }
         do {
             let r: SubagentsResponse = try await api.get("/sessions/\(id)/subagents")
-            // Newest first everywhere (the server lists them oldest first).
+            // Running first, then newest first (the server lists them oldest first).
             let list = r.subagents.enumerated().sorted { a, b in
+                if (a.element.running == true) != (b.element.running == true) {
+                    return a.element.running == true
+                }
                 switch (a.element.startedAt, b.element.startedAt) {
                 case let (x?, y?) where x != y: return x > y
                 default: return a.offset > b.offset
