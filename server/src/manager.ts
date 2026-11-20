@@ -918,8 +918,8 @@ export class Manager implements SessionHost, SessionToolHost {
         q.close();
       }
     }
-    // Keep a good reading over a half answer.
-    if (u && (settled(u) || !this.usage)) {
+    // Keep a good reading over a half answer, unless the plan changed: the old windows no longer apply.
+    if (u && (settled(u) || !this.usage || u.plan !== this.usage.plan)) {
       this.usage = u;
       this.broadcastGlobal(event('usage', { usage: u }));
     }
