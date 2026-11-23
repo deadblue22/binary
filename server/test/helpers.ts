@@ -1,4 +1,4 @@
-import { chmodSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, writeFileSync } from 'node:fs';
+import { chmodSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -16,7 +16,7 @@ export interface Harness {
   cwd: string;
   manager: Manager;
   launches(): string[];
-  /** Replaces what `claude agents --json` reports from now on. */
+  /** Replaces the running sessions Claude Code registers from now on. */
   setAgents(agents: unknown[]): void;
   /** Stops the manager as binaryd does on a signal and starts a new one on the same state. */
   restart(graceMs?: number): Promise<void>;
@@ -43,9 +43,15 @@ export async function harness(
     PATH: process.env.PATH ?? '',
     HOME: process.env.HOME ?? '',
     CLAUDE_CONFIG_DIR: configDir,
-    FAKE_AGENTS: JSON.stringify(opts.agents ?? []),
-    FAKE_AGENTS_FILE: join(root, 'agents.json'),
   };
+  // Running sessions as Claude Code registers them, one record per file.
+  const setAgents = (agents: unknown[]) => {
+    const dir = join(configDir, 'sessions');
+    rmSync(dir, { recursive: true, force: true });
+    mkdirSync(dir);
+    agents.forEach((a, i) => writeFileSync(join(dir, `${i}.json`), JSON.stringify(a)));
+  };
+  setAgents(opts.agents ?? []);
   const start = async () => {
     const cfg = loadConfig(join(root, 'home'));
     const m = new Manager(cfg, new Store(cfg.dir), {
@@ -73,7 +79,7 @@ export async function harness(
         return [];
       }
     },
-    setAgents: (agents) => writeFileSync(join(root, 'agents.json'), JSON.stringify(agents)),
+    setAgents,
     restart: async (graceMs = 0) => {
       await h.manager.shutdown(graceMs);
       h.manager = await start();

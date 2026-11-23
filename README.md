@@ -2,7 +2,7 @@
 
 A client/server tool for managing Claude Code sessions on your own machine or on servers.
 
-- **binaryd** (server, TypeScript / Node.js): runs on the machine you want to manage (macOS / Linux). Every interaction with Claude Code goes through the **official Claude Agent SDK** (plus `claude agents --json`, which Claude Code provides for scripts): it doesn't modify Claude Code, doesn't implement internal protocols, and never touches your login credentials.
+- **binaryd** (server, TypeScript / Node.js): runs on the machine you want to manage (macOS / Linux). Every interaction with Claude Code goes through the **official Claude Agent SDK** (plus the running-session records Claude Code keeps in `~/.claude/sessions`, the same ones `claude agents --json` lists): it doesn't modify Claude Code, doesn't implement internal protocols, and never touches your login credentials.
 - **Binary.app** (client, SwiftUI, macOS 14+): connects to several servers at once to view and work with their sessions.
 - **Binary for iOS** (client, SwiftUI, iOS 17+): the same client on iPhone and iPad, built from the same sources and installed from Xcode onto your own device (see [iPhone and iPad](#iphone-and-ipad)).
 

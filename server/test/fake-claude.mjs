@@ -5,20 +5,13 @@
 // without calling the API.
 //
 // Prompts containing "permission" trigger a Write approval request.
-// `agents --json` prints the file $FAKE_AGENTS_FILE when it exists, else
-// $FAKE_AGENTS (default []).
 
-import { appendFileSync, mkdirSync, existsSync, readFileSync } from 'node:fs';
+import { appendFileSync, mkdirSync, existsSync } from 'node:fs';
 import { join } from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { createInterface } from 'node:readline';
 
 const args = process.argv.slice(2);
-if (args[0] === 'agents') {
-  const file = process.env.FAKE_AGENTS_FILE;
-  process.stdout.write(file && existsSync(file) ? readFileSync(file, 'utf8') : (process.env.FAKE_AGENTS ?? '[]'));
-  process.exit(0);
-}
 if (args[0] === '--version') {
   process.stdout.write('9.9.9 (Fake Claude Code)\n');
   process.exit(0);

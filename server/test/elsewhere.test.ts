@@ -3,6 +3,7 @@ import { randomUUID } from 'node:crypto';
 import { appendFileSync, readFileSync, utimesSync } from 'node:fs';
 import { join } from 'node:path';
 import { test } from 'node:test';
+import { activeAgents } from '../src/claude.js';
 import { harness, transcriptLine, waitFor, writeTranscript } from './helpers.js';
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
@@ -147,6 +148,26 @@ test("a session moved from another machine runs in the folder its holder started
     assert.equal(sum.cwd, h.cwd);
     assert.equal(sum.cwdExists, true);
     assert.equal(h.manager.cannotRun(id), undefined);
+  } finally {
+    await h.close();
+  }
+});
+
+test('records of ended processes and reused pids are not running sessions', async () => {
+  const live = randomUUID();
+  const h = await harness({
+    agents: [
+      { pid: 1, cwd: '/x', kind: 'interactive', sessionId: live, status: 'idle' },
+      // No such process.
+      { pid: 2 ** 22 + 12345, cwd: '/x', kind: 'interactive', sessionId: randomUUID(), status: 'busy' },
+      // The pid runs, but it is another process than the one that wrote the record.
+      { pid: process.pid, procStart: 'Thu Jan  1 00:00:00 1970', cwd: '/x', kind: 'interactive', sessionId: randomUUID(), status: 'busy' },
+      'not a record',
+    ],
+  });
+  try {
+    const list = await activeAgents({ CLAUDE_CONFIG_DIR: h.configDir });
+    assert.deepEqual(list.map((a) => a.sessionId), [live]);
   } finally {
     await h.close();
   }

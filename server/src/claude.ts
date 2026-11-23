@@ -1,7 +1,8 @@
 // Locating Claude Code and preparing the environment it runs in.
 
 import { execFile } from 'node:child_process';
-import { existsSync, readFileSync } from 'node:fs';
+import { existsSync, readdirSync, readFileSync } from 'node:fs';
+import { homedir } from 'node:os';
 import { createRequire } from 'node:module';
 import { dirname, join } from 'node:path';
 import { query, type Options, type SDKUserMessage } from '@anthropic-ai/claude-agent-sdk';
@@ -97,7 +98,7 @@ export async function claudeVersion(bin: string, env: Record<string, string>): P
   }
 }
 
-/** A session listed by `claude agents --json`. */
+/** A session Claude Code registers as running (as `claude agents --json` lists it). */
 export interface ActiveAgent {
   pid: number;
   cwd: string;
@@ -108,9 +109,84 @@ export interface ActiveAgent {
   startedAt?: number;
 }
 
-/** Sessions Claude Code reports as running anywhere on this machine. */
-export async function activeAgents(bin: string, env: Record<string, string>): Promise<ActiveAgent[]> {
-  const out = await run(bin, ['agents', '--json'], env, 10_000);
-  const parsed = JSON.parse(out) as unknown;
-  return Array.isArray(parsed) ? (parsed as ActiveAgent[]).filter((a) => a && typeof a.sessionId === 'string') : [];
+/** pid:procStart → whether that process is still the one that wrote the record. */
+const verified = new Map<string, boolean>();
+
+function alive(pid: number): boolean {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (err) {
+    return (err as NodeJS.ErrnoException).code === 'EPERM';
+  }
+}
+
+/** The start stamp Claude Code records for pid, in the same form (undefined: can't tell). */
+async function procStart(pid: number): Promise<string | undefined> {
+  if (process.platform === 'linux') {
+    try {
+      // Field 22 (starttime), counted after the parenthesised command name.
+      const stat = readFileSync(`/proc/${pid}/stat`, 'utf8');
+      return stat.slice(stat.lastIndexOf(')') + 2).split(' ')[19];
+    } catch {
+      return undefined;
+    }
+  }
+  return new Promise((ok) => {
+    execFile('ps', ['-o', 'lstart=', '-p', String(pid)], { env: { ...process.env, LC_ALL: 'C', TZ: 'UTC' }, timeout: 5_000 }, (err, out) =>
+      ok(err ? undefined : out.trim().replace(/\s+/g, ' ') || undefined));
+  });
+}
+
+/**
+ * Sessions Claude Code reports as running anywhere on this machine: the
+ * records each claude process keeps in <config>/sessions (what `claude agents
+ * --json` reads), whose process is still running. Read directly, so polling
+ * starts no claude process.
+ */
+export async function activeAgents(env: Record<string, string>): Promise<ActiveAgent[]> {
+  const dir = join(env.CLAUDE_CONFIG_DIR || process.env.CLAUDE_CONFIG_DIR || join(homedir(), '.claude'), 'sessions');
+  let names: string[];
+  try {
+    names = readdirSync(dir).filter((n) => n.endsWith('.json'));
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException).code === 'ENOENT') return [];
+    throw err;
+  }
+  const out: ActiveAgent[] = [];
+  const seen = new Set<string>();
+  for (const name of names) {
+    let r: Record<string, unknown>;
+    try {
+      r = JSON.parse(readFileSync(join(dir, name), 'utf8')) as Record<string, unknown>;
+    } catch {
+      continue; // being written, or not a record
+    }
+    const pid = r.pid;
+    if (typeof pid !== 'number' || typeof r.sessionId !== 'string' || !alive(pid)) continue;
+    // A reused pid: the record's process ended without removing it.
+    if (typeof r.procStart === 'string' && r.procStart) {
+      const key = `${pid}:${r.procStart}`;
+      seen.add(key);
+      let ok = verified.get(key);
+      if (ok === undefined) {
+        const now = await procStart(pid);
+        ok = now === undefined || now === r.procStart.trim().replace(/\s+/g, ' ');
+        verified.set(key, ok);
+      }
+      if (!ok) continue;
+    }
+    out.push({
+      pid,
+      cwd: typeof r.cwd === 'string' ? r.cwd : '',
+      kind: typeof r.kind === 'string' ? r.kind : 'interactive',
+      sessionId: r.sessionId,
+      ...(typeof r.name === 'string' && r.name && { name: r.name }),
+      // The record says what keeps it busy (busy, shell, …); the CLI reports busy.
+      status: r.status === undefined || r.status === 'idle' ? 'idle' : 'busy',
+      ...(typeof r.startedAt === 'number' && { startedAt: r.startedAt }),
+    });
+  }
+  for (const key of verified.keys()) if (!seen.has(key)) verified.delete(key);
+  return out;
 }

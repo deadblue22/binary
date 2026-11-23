@@ -1,5 +1,5 @@
 // Session registry: lists stored sessions through the Agent SDK, tracks which
-// ones are running elsewhere through `claude agents --json`, owns the runtime
+// ones are running elsewhere through Claude Code's session records, owns the runtime
 // Session objects and fans out list changes.
 
 import { randomUUID } from 'node:crypto';
@@ -156,7 +156,7 @@ export class HttpError extends LocalizedError {
 }
 
 export interface ManagerOptions {
-  /** Executable for `claude agents --json` and --version. */
+  /** Executable for --version. */
   claudeBin: string;
   claudeVersion: string;
   /** Passed to the SDK when the user configured their own claude. */
@@ -433,8 +433,6 @@ export class Manager implements SessionHost, SessionToolHost {
     if (!this.closing && models?.length && this.store.setModels(models)) {
       this.broadcastGlobal(event('models', { models }));
     }
-    // Plan usage through the process that just started, when the last reading is old.
-    if (!this.usage || Date.now() - Date.parse(this.usage.at) > 120_000) void this.planUsage(true);
   }
 
   onTerminalCommands(names: string[]): void {
@@ -611,7 +609,7 @@ export class Manager implements SessionHost, SessionToolHost {
     if (this.polling) return;
     this.polling = true;
     try {
-      const list = await activeAgents(this.opts.claudeBin, this.opts.env);
+      const list = await activeAgents(this.opts.env);
       const next = new Map(list.map((a) => [a.sessionId, a]));
       if (list.some((a) => !this.holders.has(a.pid))) {
         const table = await processTable();
@@ -632,7 +630,7 @@ export class Manager implements SessionHost, SessionToolHost {
       for (const a of list) if (a.status === 'busy') void this.checkTurn(a.sessionId);
       void this.drainQueues();
     } catch (err) {
-      if (this.agentsOk) this.log(`claude agents --json failed: ${(err as Error).message}`);
+      if (this.agentsOk) this.log(`reading running claude sessions failed: ${(err as Error).message}`);
       this.agentsOk = false;
     } finally {
       this.polling = false;
@@ -831,9 +829,13 @@ export class Manager implements SessionHost, SessionToolHost {
     if (!this.usage || Date.now() - Date.parse(this.usage.at) > 120_000) void this.planUsage(true);
   }
 
-  /** Last known plan usage, read again when older than maxAgeMs. */
-  async planUsage(refresh = false, maxAgeMs = 300_000): Promise<PlanUsage | undefined> {
-    if (!refresh && this.usage && Date.now() - Date.parse(this.usage.at) < maxAgeMs) return this.usage;
+  /**
+   * Last known plan usage. It is read again (through a live process) when a
+   * turn ends, or when a client asks with refresh; a
+   * client polling only gets the cached reading.
+   */
+  async planUsage(refresh = false): Promise<PlanUsage | undefined> {
+    if (!refresh) return this.usage;
     this.usageReading ??= this.readUsage().finally(() => (this.usageReading = undefined));
     return this.usageReading;
   }
