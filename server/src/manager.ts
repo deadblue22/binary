@@ -9,8 +9,6 @@ import { basename, dirname, isAbsolute, join, resolve } from 'node:path';
 import { StringDecoder } from 'node:string_decoder';
 import {
   forkSession,
-  query,
-  type SDKUserMessage,
   getSessionMessages,
   getSessionInfo,
   getSubagentMessages,
@@ -26,7 +24,7 @@ import {
 import { lastMessageAt } from './activity.js';
 import { readTaskOutput, runningTasks } from './bgtasks.js';
 import { resumeNote, saveInterrupted, takeInterrupted, type Interrupted } from './restart.js';
-import { activeAgents, probeClaude, type ActiveAgent } from './claude.js';
+import { activeAgents, type ActiveAgent } from './claude.js';
 import { CommandProbe, toCommands, type Command } from './commands.js';
 import type { Config } from './config.js';
 import { DesktopLinks } from './desktop.js';
@@ -39,7 +37,7 @@ import { DEFAULT_LANG, encode, LocalizedError, T, type Lang, type Msg, type Text
 import { event, Subscriber, type Event, type Sink } from './log.js';
 import { preview, titleFromPrompt, toEntries, type Entry, type RawMessage } from './normalize.js';
 import { isUnder, mainCheckout, tempRoots } from './recent.js';
-import { checkImages, NotLiveError, readPlanUsage, Session, type ImageInput, type BackgroundTask, type PlanUsage, type SessionHost, type SettingsUpdate } from './session.js';
+import { checkImages, NotLiveError, Session, type ImageInput, type BackgroundTask, type PlanUsage, type SessionHost, type SettingsUpdate } from './session.js';
 import { LAYOUT_FIELDS, type Layout, type LayoutStamps, type Store } from './store.js';
 
 export const EFFORT_LEVELS = ['low', 'medium', 'high', 'xhigh', 'max'];
@@ -385,7 +383,6 @@ export class Manager implements SessionHost, SessionToolHost {
   /** Sessions a client took over from the program running them (see takeover). */
   private takenOver = new Set<string>();
   private global = new Set<Subscriber>();
-  private modelRefreshTimer?: NodeJS.Timeout;
   private dirty = new Set<string>();
   private timers: NodeJS.Timeout[] = [];
   private listing = false;
@@ -428,21 +425,16 @@ export class Manager implements SessionHost, SessionToolHost {
     return this.store.models() ?? FALLBACK_MODELS;
   }
 
-  private async refreshModels(): Promise<void> {
-    if (this.closing || this.modelRefreshTimer) return;
-    // Share one refresh across connections and only recheck while a client is connected.
-    this.modelRefreshTimer = setTimeout(() => {
-      this.modelRefreshTimer = undefined;
-      if (this.global.size) void this.refreshModels();
-    }, 60 * 60_000).unref();
-    try {
-      const { models } = await probeClaude({ ...this.probeOptions(homedir()), persistSession: false });
-      if (!this.closing && Array.isArray(models) && models.length && this.store.setModels(models)) {
-        this.broadcastGlobal(event('models', { models }));
-      }
-    } catch (err) {
-      this.log(`reading models failed: ${(err as Error).message}`);
+  /**
+   * Models as a starting process reports them. binaryd never starts claude
+   * just to ask: with no session running, the last list read stays.
+   */
+  onStarted(s: Session, models: unknown[] | undefined): void {
+    if (!this.closing && models?.length && this.store.setModels(models)) {
+      this.broadcastGlobal(event('models', { models }));
     }
+    // Plan usage through the process that just started, when the last reading is old.
+    if (!this.usage || Date.now() - Date.parse(this.usage.at) > 120_000) void this.planUsage(true);
   }
 
   onTerminalCommands(names: string[]): void {
@@ -491,8 +483,6 @@ export class Manager implements SessionHost, SessionToolHost {
     const warm = setTimeout(() => this.searcher.warm(), 2_000);
     warm.unref();
     this.timers.push(warm);
-    // Plan usage for /info, read once in the background after startup.
-    setTimeout(() => void this.planUsage(), 5_000).unref();
   }
 
   /** Refreshes the stored-session list and marks what changed. */
@@ -896,8 +886,8 @@ export class Manager implements SessionHost, SessionToolHost {
   }
 
   /**
-   * Through any live process; with none, a short-lived one that only starts
-   * up and answers (no prompt, no model call).
+   * Through a live process only: with no session running, binaryd starts no
+   * claude process and keeps the last reading.
    */
   private async readUsage(): Promise<PlanUsage | undefined> {
     let u: PlanUsage | undefined;
@@ -905,18 +895,6 @@ export class Manager implements SessionHost, SessionToolHost {
     const settled = (x?: PlanUsage) => !!x && (x.available || !x.plan);
     for (const s of this.sessions.values()) {
       if (s.live && settled((u = await s.planUsage()))) break;
-    }
-    if (!settled(u)) {
-      const input = { async *[Symbol.asyncIterator]() { await new Promise(() => undefined); } } as AsyncIterable<SDKUserMessage>;
-      const q = query({ prompt: input, options: this.probeOptions(homedir()) });
-      try {
-        await Promise.race([q.initializationResult(), new Promise((_, no) => setTimeout(() => no(new Error('timeout')), 60_000).unref())]);
-        u = await readPlanUsage(q);
-      } catch (err) {
-        this.log(`reading plan usage failed: ${(err as Error).message}`);
-      } finally {
-        q.close();
-      }
     }
     // Keep a good reading over a half answer, unless the plan changed: the old windows no longer apply.
     if (u && (settled(u) || !this.usage || u.plan !== this.usage.plan)) {
@@ -965,7 +943,6 @@ export class Manager implements SessionHost, SessionToolHost {
    */
   async shutdown(graceMs = 0): Promise<void> {
     this.closing = true;
-    clearTimeout(this.modelRefreshTimer);
     for (const t of this.timers) clearInterval(t);
     this.lister.close();
     this.searcher.close();
@@ -1302,10 +1279,7 @@ export class Manager implements SessionHost, SessionToolHost {
     sub.send(event('sessions', { sessions: this.summaries() }));
     sub.send(event('layout', { layout: this.store.layout() }));
     sub.send(event('models', { models: this.models() }));
-    if (!sub.closed) {
-      this.global.add(sub);
-      void this.refreshModels();
-    }
+    if (!sub.closed) this.global.add(sub);
     return sub;
   }
 

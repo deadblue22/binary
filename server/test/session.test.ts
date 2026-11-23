@@ -13,20 +13,22 @@ import { harness, hasFlag, transcriptLine, waitFor, writeTranscript } from './he
 const lines = (s: { log: { entries: { kind: string; blocks?: { type: string; text?: unknown }[] }[] } }) =>
   s.log.entries.map((e) => `${e.kind} ${(e.blocks ?? []).map((b) => `${b.type}:${String(b.text ?? '')}`).join('|')}`.trim());
 
-test('connecting refreshes a stale model catalog without a session', async () => {
+test('without a session nothing starts claude; a starting session refreshes models', async () => {
   const h = await harness();
   try {
     h.manager.store.setModels([{ value: 'old', displayName: 'Old' }]);
     const events: Ev[] = [];
     h.manager.subscribeGlobal(collect(events));
     const modelEvents = () => events.filter((e) => e.type === 'models').map((e) => JSON.parse(e.data).models);
-    await waitFor('refreshed model catalog', () => modelEvents().length >= 2);
+    assert.equal(await h.manager.planUsage(true), undefined);
+    await new Promise((r) => setTimeout(r, 300));
+    assert.deepEqual(modelEvents(), [[{ value: 'old', displayName: 'Old' }]]);
+
+    await h.manager.create({ cwd: h.cwd, prompt: 'hello' });
+    await waitFor('models from the started process', () => modelEvents().length >= 2);
     const models = [{ value: 'fake', displayName: 'Fake', description: 'test model' }];
-    assert.deepEqual(modelEvents(), [
-      [{ value: 'old', displayName: 'Old' }], models,
-    ]);
+    assert.deepEqual(modelEvents()[1], models);
     assert.deepEqual(h.manager.models(), models);
-    assert.deepEqual(h.manager.summaries(), []);
   } finally {
     await h.close();
   }

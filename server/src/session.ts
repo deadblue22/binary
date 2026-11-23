@@ -132,6 +132,8 @@ export interface SessionHost {
   log(msg: string): void;
   /** A turn ended: context usage changed, and plan usage may have. */
   onTurnEnd?(s: Session): void;
+  /** A process started and reported the models it offers. */
+  onStarted?(s: Session, models: unknown[] | undefined): void;
 }
 
 const SNAPSHOT_ENTRIES = 300;
@@ -617,9 +619,11 @@ export class Session {
     this.proc = proc;
     proc.done = this.consume(proc);
 
+    let models: unknown[] | undefined;
     try {
       const init = await withTimeout(q.initializationResult(), 120_000, T('initTimeout'));
       if (Array.isArray(init.commands)) this.commands = init.commands;
+      if (Array.isArray(init.models)) models = init.models;
     } catch (err) {
       proc.closing = true;
       q.close();
@@ -637,6 +641,7 @@ export class Session {
     // What the new process read; later changes not made by it came from elsewhere.
     this.ownStamp = await this.readStamp();
     void this.refreshContext();
+    this.host.onStarted?.(this, models);
     return proc;
   }
 
