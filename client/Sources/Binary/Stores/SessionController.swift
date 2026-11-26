@@ -53,10 +53,13 @@ final class SessionController {
 
     private var gen: String?
     private(set) var references = GitHubReferences()
-    private(set) var earlierReferences: GitHubReferences?
+    private(set) var referenceHistory: GitHubReferenceHistory?
+    var needsReferenceHistory: Bool { hasMore && (referenceHistory == nil || referenceHistory?.before != nil) }
     private(set) var referenceHistoryFailed = false
     /// Identifies the history preceding the current snapshot, even across server switches.
-    var referenceHistoryKey: String { "\(conn.id)|\(id)|\(gen ?? "")|\(connected)" }
+    var referenceHistoryKey: String {
+        "\(conn.id)|\(id)|\(gen ?? "")|\(entries.first?.uuid ?? "")|\(connected)"
+    }
 
     private var lastSeq: Int64 = 0
     /// The saved copy shown before the server answered: its generation, and
@@ -142,6 +145,7 @@ final class SessionController {
         DebugHooks.mark("cache \(t.entries.count) entries")
         entries = t.entries
         hasMore = t.hasMore
+        referenceHistory = t.referenceHistory
         cachedGen = t.gen
         cachedSeqsMatch = t.seqsMatchGen == true
         olderBySeq = false
@@ -156,11 +160,15 @@ final class SessionController {
         Array(entries.reversed().lazy.filter { $0.kind == "user" || $0.kind == "assistant" }.prefix(5).map(\.uuid))
     }
 
+    private var currentTranscript: CachedTranscript? {
+        guard let generation = gen ?? cachedGen, !entries.isEmpty else { return nil }
+        return CachedTranscript(gen: generation, lastSeq: lastSeq, hasMore: hasMore, entries: entries,
+                                seqsMatchGen: olderBySeq, referenceHistory: referenceHistory)
+    }
+
     private func save(flush: Bool = false) {
-        guard let gen, !entries.isEmpty else { return }
-        LocalCache.shared.store(server: conn.id, session: id,
-                                CachedTranscript(gen: gen, lastSeq: lastSeq, hasMore: hasMore, entries: entries, seqsMatchGen: olderBySeq),
-                                flush: flush)
+        guard gen != nil, let transcript = currentTranscript else { return }
+        LocalCache.shared.store(server: conn.id, session: id, transcript, flush: flush)
     }
 
     // MARK: - Events
@@ -174,7 +182,12 @@ final class SessionController {
             // Snapshots can be large; decode off the main actor.
             let decoded = await Task.detached { try? WireDate.decoder.decode(SnapshotEvent.self, from: data) }.value
             guard let ev = decoded else { return }
-            earlierReferences = nil
+            if ev.hasMore, let saved = currentTranscript, saved.gen == ev.gen,
+               let first = ev.entries.first, let start = entries.firstIndex(where: { $0.uuid == first.uuid }) {
+                referenceHistory = saved.history(before: start)
+            } else {
+                referenceHistory = nil
+            }
             gen = ev.gen
             entries = ev.entries
             lastSeq = ev.entries.last?.seq ?? 0
@@ -197,15 +210,16 @@ final class SessionController {
             guard let ev = decoded else { return }
             let before = entries
             if let i = entries.lastIndex(where: { $0.uuid == ev.anchor }) {
+                if (gen ?? cachedGen) != ev.gen { referenceHistory = nil }
                 entries = Array(entries[...i]) + ev.entries
                 // Seqs of the kept entries still hold if the log is the same generation.
                 olderBySeq = cachedSeqsMatch && cachedGen == ev.gen
             } else {
+                referenceHistory = nil
                 entries = ev.entries
                 hasMore = true
                 olderBySeq = true
             }
-            earlierReferences = nil
             gen = ev.gen
             lastSeq = ev.entries.last?.seq ?? ev.anchorSeq
             partial = ev.partial
@@ -287,15 +301,19 @@ final class SessionController {
 
     func loadEarlierReferences() async {
         referenceHistoryFailed = false
-        guard earlierReferences == nil, hasMore, connected, let gen, let first = entries.first?.uuid,
+        guard needsReferenceHistory, connected, let gen, let first = entries.first?.uuid,
               let api = conn.api else { return }
+        let key = referenceHistoryKey
+        let history = referenceHistory ?? GitHubReferenceHistory(before: first)
         do {
             let path = "/sessions/\(id)/entries"
-            let history = try await GitHubReferences.earlier(than: first, generation: gen) { cursor in
-                try await api.get(path, query: ["beforeUuid": cursor, "limit": "300"])
+            try await history.scan(generation: gen) { cursor in
+                guard self.referenceHistoryKey == key else { throw CancellationError() }
+                return try await api.get(path, query: ["beforeUuid": cursor, "limit": "300"])
+            } didRead: { page in
+                if self.referenceHistoryKey == key { referenceHistory = page }
             }
-            guard !Task.isCancelled, gen == self.gen else { return }
-            earlierReferences = history
+            save()
         } catch is CancellationError {
             return
         } catch {

@@ -1,7 +1,7 @@
 import Foundation
 
 /// GitHub shares one number sequence between issues and pull requests in a repository.
-struct GitHubReference: Identifiable, Equatable {
+struct GitHubReference: Codable, Sendable, Identifiable, Equatable {
     let repository: String
     let number: String
     let kind: String?
@@ -16,26 +16,20 @@ struct GitHubReference: Identifiable, Equatable {
     }
 }
 
-struct GitHubReferences {
+struct GitHubReferences: Codable, Sendable {
     private var byID: [String: GitHubReference] = [:]
     private var order: [String] = []
 
     var values: [GitHubReference] { order.compactMap { byID[$0] } }
 
-    /// Keep only references from each older page. The transcript retains its own scroll window.
-    static func earlier(than first: String, generation: String,
-                        pageBefore: (String) async throws -> EntriesPage) async throws -> Self {
-        var history = Self()
-        var cursor = first
-        while true {
-            try Task.checkCancellation()
-            let page = try await pageBefore(cursor)
-            try Task.checkCancellation()
-            guard page.gen == nil || page.gen == generation else { throw CancellationError() }
-            history.append(page.entries)
-            guard page.hasMore == true, let next = page.entries.first?.uuid, next != cursor else { return history }
-            cursor = next
-        }
+    init() {}
+
+    init(from decoder: Decoder) throws {
+        for reference in try [GitHubReference](from: decoder) { add(reference) }
+    }
+
+    func encode(to encoder: Encoder) throws {
+        try values.encode(to: encoder)
     }
 
     mutating func merge(_ other: GitHubReferences) {
@@ -87,7 +81,7 @@ struct GitHubReferences {
         }
     }
 
-    mutating func append(_ entries: [Entry]) {
+    mutating func append(_ entries: some Sequence<Entry>) {
         for entry in entries where entry.kind == "user" || entry.kind == "assistant" {
             for block in entry.blocks ?? [] {
                 switch block.type {
@@ -96,6 +90,27 @@ struct GitHubReferences {
                 default: break
                 }
             }
+        }
+    }
+}
+
+/// References preceding a saved transcript window. A cursor means the earlier prefix is still unscanned.
+struct GitHubReferenceHistory: Codable, Sendable {
+    var before: String?
+    var references = GitHubReferences()
+
+    func scan(generation: String, pageBefore: (String) async throws -> EntriesPage,
+              didRead: (Self) -> Void) async throws {
+        var history = self
+        while let cursor = history.before {
+            try Task.checkCancellation()
+            let page = try await pageBefore(cursor)
+            try Task.checkCancellation()
+            guard page.gen == nil || page.gen == generation else { throw CancellationError() }
+            history.references.append(page.entries)
+            let next = page.entries.first?.uuid
+            history.before = page.hasMore == true && next != cursor ? next : nil
+            didRead(history)
         }
     }
 }

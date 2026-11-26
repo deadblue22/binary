@@ -118,21 +118,59 @@ final class GitHubReferencesTests: XCTestCase {
 
     func testEarlierPagesFollowUUIDsAndDiscardChangedGeneration() async throws {
         var cursors: [String] = []
-        let history = try await GitHubReferences.earlier(than: "end", generation: "g") { cursor in
+        var history = GitHubReferenceHistory(before: "end")
+        try await history.scan(generation: "g") { cursor in
             cursors.append(cursor)
             let id = cursor == "end" ? "middle" : "start"
             let entry = Entry(seq: 1, uuid: id, kind: "assistant", blocks: [
                 Block(type: "text", text: id == "middle" ? "PR repo/app#2" : "Issue repo/app#1 and PR repo/app#2"),
             ])
             return EntriesPage(entries: [entry], hasMore: id == "middle", gen: "g")
-        }
+        } didRead: { history = $0 }
+        XCTAssertNil(history.before)
         XCTAssertEqual(cursors, ["end", "middle"])
-        XCTAssertEqual(history.values.map(\.label), ["PR #2", "Issue #1"])
+        XCTAssertEqual(history.references.values.map(\.label), ["PR #2", "Issue #1"])
         do {
-            _ = try await GitHubReferences.earlier(than: "end", generation: "g") { _ in
+            try await GitHubReferenceHistory(before: "end").scan(generation: "g") { _ in
                 EntriesPage(entries: [], hasMore: false, gen: "replaced")
-            }
+            } didRead: { _ in XCTFail("Accepted a page from a different generation") }
             XCTFail("History from a replaced transcript was accepted")
         } catch is CancellationError {}
     }
+
+    func testCachedWindowRestoresReferencesAndResumesOnlyUnscannedPages() async throws {
+        let entries = (1...6).map { n in
+            Entry(seq: Int64(n), uuid: "row-\(n)", kind: "user", blocks: [
+                Block(type: "text", text: "Issue org/app#\(n)")
+            ])
+        }
+        // The two cache tiers discard different numbers of transcript rows.
+        let original = CachedTranscript(gen: "g", lastSeq: 6, hasMore: true, entries: entries)
+        let disk = original.keepingLast(4).keepingLast(2)
+        let reopened = try JSONDecoder().decode(CachedTranscript.self, from: JSONEncoder().encode(disk))
+        var history = try XCTUnwrap(reopened.referenceHistory)
+        XCTAssertEqual(history.before, "row-1")
+        XCTAssertEqual(history.references.values.map(\.number), ["1", "2", "3", "4"])
+        var starts: [String] = []
+        do {
+            try await history.scan(generation: "g") { cursor in
+                starts.append(cursor)
+                if cursor == "older" { throw CancellationError() }
+                return EntriesPage(entries: [Entry(seq: 0, uuid: "older", kind: "user",
+                                                   blocks: [Block(type: "text", text: "PR org/app#7")])],
+                                   hasMore: true, gen: "g")
+            } didRead: { history = $0 }
+        } catch is CancellationError {}
+        try await history.scan(generation: "g") { cursor in
+            starts.append(cursor)
+            return EntriesPage(entries: [], hasMore: false, gen: "g")
+        } didRead: { history = $0 }
+        XCTAssertEqual(starts, ["row-1", "older", "older"])
+        XCTAssertEqual(history.references.values.last?.number, "7")
+        try await history.scan(generation: "g") { _ in
+            XCTFail("A completed index requested history again")
+            return EntriesPage(entries: [], hasMore: false, gen: "g")
+        } didRead: { _ in XCTFail("Unexpected page") }
+    }
+
 }

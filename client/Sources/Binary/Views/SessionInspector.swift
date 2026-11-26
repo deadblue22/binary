@@ -475,13 +475,13 @@ struct GitHubReferenceCard: View {
 
     private var rows: [GitHubReference] {
         var all = references
-        if let older = controller?.earlierReferences { all.merge(older) }
+        if let older = controller?.referenceHistory?.references { all.merge(older) }
         return all.values
     }
 
     var body: some View {
         let rows = rows
-        let hasEarlier = controller?.hasMore == true && controller?.earlierReferences == nil
+        let hasEarlier = controller?.needsReferenceHistory == true
         if !rows.isEmpty || hasEarlier {
             InspectorCard(title: tr("Issues and PRs"), trailing: String(rows.count)) {
                 if !rows.isEmpty {

@@ -10,6 +10,25 @@ struct CachedTranscript: Codable, Sendable {
     /// Every entry's seq belongs to `gen`. False when older entries were kept
     /// from a copy of an earlier generation: those are paged by uuid.
     var seqsMatchGen: Bool?
+    var referenceHistory: GitHubReferenceHistory?
+
+    /// Carry references from dropped rows into the prefix when the cache keeps a shorter tail.
+    func keepingLast(_ limit: Int) -> Self {
+        guard entries.count > limit else { return self }
+        let start = entries.count - limit
+        var copy = self
+        copy.referenceHistory = history(before: start)
+        copy.entries = Array(entries[start...])
+        copy.hasMore = true
+        return copy
+    }
+
+    func history(before index: Int) -> GitHubReferenceHistory {
+        var history = hasMore ? (referenceHistory ?? GitHubReferenceHistory(before: entries.first?.uuid))
+                              : GitHubReferenceHistory(before: nil)
+        history.references.append(entries[..<index])
+        return history
+    }
 }
 
 /// What the client keeps between opens and launches, so a slow link isn't
@@ -68,18 +87,9 @@ final class LocalCache {
     /// Keeps the transcript in memory now and writes it to disk after a
     /// pause (right away with `flush`).
     func store(server: UUID, session: String, _ t: CachedTranscript, flush: Bool = false) {
-        var t = t
-        if t.entries.count > Self.memoryEntries {
-            t.entries = Array(t.entries.suffix(Self.memoryEntries))
-            t.hasMore = true
-        }
-        remember(server, session, t)
-        var disk = t
-        if disk.entries.count > Self.diskEntries {
-            disk.entries = Array(disk.entries.suffix(Self.diskEntries))
-            disk.hasMore = true
-        }
-        let saved = disk
+        let memoryCopy = t.keepingLast(Self.memoryEntries)
+        remember(server, session, memoryCopy)
+        let saved = memoryCopy.keepingLast(Self.diskEntries)
         write(transcriptURL(server, session), key: "\(server)/\(session)", delay: flush ? 0 : 2) {
             try WireDate.encoder().encode(saved)
         }
