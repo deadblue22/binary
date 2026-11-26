@@ -1,4 +1,11 @@
 {
+ "Details unavailable": "无法获取详情",
+ "Still open": "进行中",
+ "Draft": "草稿",
+ "Merged": "已合并",
+ "Closed": "已关闭",
+ "Show fewer": "收起",
+ "Show {0} more": "展开其余 {0} 条",
  "Checking earlier messages…": "正在检查更早的消息…",
  "Issues and PRs": "Issue 和 PR",
  "Retry loading earlier references": "重新加载更早的引用",

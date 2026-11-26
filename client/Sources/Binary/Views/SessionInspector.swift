@@ -480,38 +480,12 @@ struct GitHubReferenceCard: View {
 
     var body: some View {
         let rows = rows
-        let groups = Dictionary(grouping: rows) { $0.repository.lowercased() }
         let hasEarlier = controller?.hasMore == true && controller?.earlierReferences == nil
         if !rows.isEmpty || hasEarlier {
             InspectorCard(title: tr("Issues and PRs"), trailing: String(rows.count)) {
-                ForEach(groups.keys.sorted(), id: \.self) { key in
-                    if let links = groups[key], let first = links.first {
-                        VStack(alignment: .leading, spacing: 5) {
-                            Text(first.repository)
-                                .font(theme.font(.caption).weight(.medium))
-                                .foregroundStyle(theme.c.textMuted)
-                            LazyVGrid(columns: [GridItem(.adaptive(minimum: theme.size(.callout) * 8), spacing: 6)],
-                                      alignment: .leading, spacing: 6) {
-                                ForEach(links) { row in
-                                    Link(destination: row.url) {
-                                        HStack(spacing: 4) {
-                                            if let kind = row.kind {
-                                                Text(kind).foregroundStyle(theme.c.textMuted)
-                                            }
-                                            Text("#" + row.number).monospacedDigit().foregroundStyle(theme.c.link)
-                                        }
-                                        .padding(.horizontal, 8)
-                                        .padding(.vertical, 4)
-                                        .frame(maxWidth: .infinity, alignment: .leading)
-                                        .background(theme.c.surfaceAlt, in: RoundedRectangle(cornerRadius: 5))
-                                    }
-                                    .buttonStyle(.plain)
-                                    .help(row.url.absoluteString)
-                                    .accessibilityLabel(Text(row.repository + " " + row.label))
-                                }
-                            }
-                        }
-                    }
+                if !rows.isEmpty {
+                    GitHubReferenceList(rows: rows)
+                        .id(controller?.ref)
                 }
                 if controller?.referenceHistoryFailed == true {
                     Button(tr("Retry loading earlier references")) { attempt += 1 }
@@ -525,6 +499,99 @@ struct GitHubReferenceCard: View {
                 await controller?.loadEarlierReferences()
             }
         }
+    }
+}
+
+private struct GitHubReferenceList: View {
+    let rows: [GitHubReference]
+    private struct Lookup {
+        let details: GitHubIssueDetails?
+        let checked = Date()
+    }
+
+    @Environment(\.theme) private var theme
+    @State private var lookups: [String: Lookup] = [:]
+    @State private var expanded = false
+
+    var body: some View {
+        let singleRepo = Set(rows.map { $0.repository.lowercased() }).count == 1
+        let visible = GitHubReference.visible(rows, expanded: expanded) { lookups[$0.id]?.details }
+        VStack(alignment: .leading, spacing: 8) {
+            if singleRepo, let first = rows.first {
+                Text(first.repository).font(theme.font(.caption)).foregroundStyle(theme.c.textMuted)
+            }
+            ForEach(visible) { row in
+                referenceLink(row, showRepo: !singleRepo)
+                if row.id != visible.last?.id { Divider() }
+            }
+            if rows.count > GitHubReference.previewCount {
+                Button {
+                    expanded.toggle()
+                } label: {
+                    Label(expanded ? tr("Show fewer") : tr("Show \(rows.count - GitHubReference.previewCount) more"),
+                          systemImage: expanded ? "chevron.up" : "chevron.down")
+                }
+                .buttonStyle(.plain)
+                .font(theme.font(.caption))
+                .foregroundStyle(theme.c.link)
+            }
+        }
+        .task(id: rows.map(\.id)) {
+            while !Task.isCancelled {
+                let cutoff = Date().addingTimeInterval(-300)
+                let pending = rows.filter { (lookups[$0.id]?.checked ?? .distantPast) <= cutoff }
+                await GitHubIssueAPI.load(pending) { id, details in
+                    if !Task.isCancelled { lookups[id] = Lookup(details: details) }
+                }
+                do { try await Task.sleep(for: .seconds(300)) } catch { return }
+            }
+        }
+    }
+
+    private func referenceLink(_ row: GitHubReference, showRepo: Bool) -> some View {
+        let lookup = lookups[row.id]
+        let details = lookup?.details
+        let label = [details?.kind ?? row.kind, "#" + row.number].compactMap { $0 }.joined(separator: " ")
+        return Link(destination: row.url) {
+            VStack(alignment: .leading, spacing: 3) {
+                Text(details?.title ?? label)
+                    .font(theme.font(.callout).weight(.medium))
+                    .foregroundStyle(theme.c.text)
+                    .lineLimit(3)
+                    .fixedSize(horizontal: false, vertical: true)
+                if showRepo {
+                    Text(row.repository).foregroundStyle(theme.c.textMuted)
+                }
+                HStack(spacing: 6) {
+                    if let details {
+                        Text(label).foregroundStyle(theme.c.link)
+                        statusLabel(details.status)
+                        Spacer(minLength: 0)
+                        Text(Format.relative(details.updatedAt)).foregroundStyle(theme.c.textMuted)
+                    } else {
+                        Text(lookup == nil ? tr("Loading…") : tr("Details unavailable"))
+                            .foregroundStyle(theme.c.textMuted)
+                    }
+                }
+            }
+            .font(theme.font(.caption))
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .help([details?.title, row.url.absoluteString].compactMap { $0 }.joined(separator: "\n"))
+    }
+
+    private func statusLabel(_ status: GitHubIssueDetails.Status) -> some View {
+        let label: String
+        let color: Color
+        switch status {
+        case .open: (label, color) = (tr("Still open"), theme.c.success)
+        case .draft: (label, color) = (tr("Draft"), theme.c.textMuted)
+        case .merged: (label, color) = (tr("Merged"), theme.c.external)
+        case .closed: (label, color) = (tr("Closed"), theme.c.textMuted)
+        }
+        return Text(label).foregroundStyle(color)
     }
 }
 

@@ -39,6 +39,32 @@ final class GitHubReferencesTests: XCTestCase {
         XCTAssertEqual(references.values.last?.url.absoluteString, "https://github.com/one2x-ai/merouter/pull/767")
     }
 
+    func testRecentPreviewAndExpandedListUseGitHubStateAndUpdateTime() throws {
+        func detail(_ day: Int, _ state: String, pr: Bool = false, merged: Bool = false,
+                    draft: Bool = false) throws -> GitHubIssueDetails {
+            var payload: [String: Any] = ["title": "Title \(day)", "state": state,
+                                          "updated_at": "2026-11-0\(day)T10:00:00Z", "draft": draft]
+            if pr { payload["pull_request"] = merged ? ["merged_at": "2026-11-01T10:00:00Z"] : [:] }
+            let decoder = JSONDecoder()
+            decoder.dateDecodingStrategy = .iso8601
+            return try decoder.decode(GitHubIssueDetails.self, from: JSONSerialization.data(withJSONObject: payload))
+        }
+        let rows = (1...7).map { GitHubReference(repository: "org/app", number: String($0), kind: nil) }
+        let details = try ["1": detail(1, "open"), "2": detail(2, "open", pr: true, draft: true),
+                           "3": detail(3, "closed", pr: true, merged: true), "4": detail(4, "closed", pr: true),
+                           "5": detail(5, "open"), "6": detail(6, "closed")]
+        XCTAssertEqual(details["3"]?.title, "Title 3")
+        XCTAssertEqual(details["6"]?.kind, "Issue")
+        XCTAssertEqual(details["4"]?.kind, "PR")
+        XCTAssertEqual(details["4"]?.status, .closed)
+        XCTAssertEqual(details["3"]?.status, .merged)
+        XCTAssertEqual(details["2"]?.status, .draft)
+        let preview = GitHubReference.visible(rows, expanded: false) { details[$0.number] }
+        XCTAssertEqual(preview.map(\.number), ["5", "2", "3", "6", "4"])
+        let expanded = GitHubReference.visible(rows, expanded: true) { details[$0.number] }
+        XCTAssertEqual(expanded.map(\.number), ["5", "1", "2", "3", "6", "4", "7"])
+    }
+
     func testEarlierPagesFollowUUIDsAndDiscardChangedGeneration() async throws {
         var cursors: [String] = []
         let history = try await GitHubReferences.earlier(than: "end", generation: "g") { cursor in

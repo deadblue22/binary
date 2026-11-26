@@ -99,3 +99,20 @@ struct GitHubReferences {
         }
     }
 }
+
+extension GitHubReference {
+    static let previewCount = 5
+
+    /// Pick the most recently updated items across repositories, then group their order by status.
+    static func visible(_ rows: [Self], expanded: Bool, details: (Self) -> GitHubIssueDetails?) -> [Self] {
+        let recent = rows.sorted { lhs, rhs in
+            let left = details(lhs)?.updatedAt ?? .distantPast
+            let right = details(rhs)?.updatedAt ?? .distantPast
+            return left == right ? lhs.id < rhs.id : left > right
+        }
+        // Swift's stable sort keeps the most recent update first within each status.
+        return recent.prefix(expanded ? recent.count : previewCount).sorted {
+            (details($0)?.status.rawValue ?? .max) < (details($1)?.status.rawValue ?? .max)
+        }
+    }
+}
