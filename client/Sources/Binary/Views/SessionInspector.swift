@@ -466,6 +466,7 @@ private struct InspectorHost<I: View>: ViewModifier {
 
 /// Older pages are scanned separately so opening the inspector doesn't expand the transcript.
 struct GitHubReferenceCard: View {
+    var server: APIClient? = nil
     var controller: SessionController?
     let references: GitHubReferences
 
@@ -484,7 +485,8 @@ struct GitHubReferenceCard: View {
         if !rows.isEmpty || hasEarlier {
             InspectorCard(title: tr("Issues and PRs"), trailing: String(rows.count)) {
                 if !rows.isEmpty {
-                    GitHubReferenceList(rows: rows)
+                    GitHubReferenceList(rows: rows, server: server)
+                        .id(server.map(ObjectIdentifier.init))
                         .id(controller?.ref)
                 }
                 if controller?.referenceHistoryFailed == true {
@@ -504,6 +506,7 @@ struct GitHubReferenceCard: View {
 
 private struct GitHubReferenceList: View {
     let rows: [GitHubReference]
+    let server: APIClient?
     private struct Lookup {
         let details: GitHubIssueDetails?
         let checked = Date()
@@ -540,7 +543,7 @@ private struct GitHubReferenceList: View {
             while !Task.isCancelled {
                 let cutoff = Date().addingTimeInterval(-300)
                 let pending = rows.filter { (lookups[$0.id]?.checked ?? .distantPast) <= cutoff }
-                await GitHubIssueAPI.load(pending) { id, details in
+                await GitHubIssueAPI.load(pending, server: server) { id, details in
                     if !Task.isCancelled { lookups[id] = Lookup(details: details) }
                 }
                 do { try await Task.sleep(for: .seconds(300)) } catch { return }

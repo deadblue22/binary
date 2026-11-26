@@ -62,7 +62,12 @@ struct GitHubIssueAPI {
         #endif
     }
 
-    private static func details(for ref: GitHubReference, token: String?) async -> GitHubIssueDetails? {
+    private static func details(for ref: GitHubReference, server: APIClient?, token: String?) async -> GitHubIssueDetails? {
+        if let server, let details: GitHubIssueDetails = try? await server.get("/github/issue", query: [
+            "repository": ref.repository, "number": ref.number
+        ]) { return details }
+        guard !Task.isCancelled else { return nil }
+        // Public repositories are still readable when the server has no gh login.
         let url = URL(string: "https://api.github.com/repos")!
             .appendingPathComponent(ref.repository)
             .appendingPathComponent("issues")
@@ -79,7 +84,7 @@ struct GitHubIssueAPI {
         } catch { return nil }
     }
 
-    static func load(_ refs: [GitHubReference],
+    static func load(_ refs: [GitHubReference], server: APIClient?,
                      receive: @MainActor (String, GitHubIssueDetails?) -> Void) async {
         guard !refs.isEmpty else { return }
         let token = await credential()
@@ -87,7 +92,7 @@ struct GitHubIssueAPI {
             var remaining = refs.makeIterator()
             func enqueueNext() {
                 if let ref = remaining.next() {
-                    group.addTask { (ref.id, await details(for: ref, token: token)) }
+                    group.addTask { (ref.id, await details(for: ref, server: server, token: token)) }
                 }
             }
             for _ in 0..<min(4, refs.count) { enqueueNext() }

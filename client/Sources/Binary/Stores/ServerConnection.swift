@@ -74,6 +74,8 @@ final class ServerConnection: Identifiable {
         LocalCache.shared.storeSessions(server: id, Array(sessions.values))
     }
 
+    var githubIssueAPI: APIClient? { info?.githubIssueDetails == true ? api : nil }
+
     var displayName: String {
         config.name.isEmpty ? (info?.name ?? config.url) : config.name
     }

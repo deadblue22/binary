@@ -53,6 +53,8 @@ const CATALOG = {
   // errors
   bodyTooLarge: 'Request body too large',
   badRequest: 'Malformed request: {detail}',
+  githubIssueInvalid: 'Invalid GitHub repository or issue number',
+  githubIssueUnavailable: 'Could not read the issue or pull request with the server’s GitHub CLI',
   tokenInvalid: 'Invalid token',
   notFound: 'Not found',
   methodNotAllowed: 'Method not allowed',

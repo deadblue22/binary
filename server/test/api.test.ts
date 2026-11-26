@@ -54,6 +54,32 @@ test('auth', async () => {
   assert.equal(q.status, 200);
 });
 
+test('GitHub issue metadata uses the authenticated server account and validates the reference', async (t) => {
+  const path = '/api/v1/github/issue?repository=org%2Fprivate&number=42';
+  assert.equal((await call('GET', path, undefined, null)).status, 401);
+  assert.equal((await call('GET', '/api/v1/info')).json.githubIssueDetails, true);
+  for (const repository of ['org/..', 'org/repo/pulls', 'https://example.com/repo']) {
+    assert.equal((await call('GET', `/api/v1/github/issue?repository=${encodeURIComponent(repository)}&number=42`)).status, 400);
+  }
+  assert.equal((await call('GET', path + 'x')).status, 400);
+
+  const bin = mkdtempSync(join(tmpdir(), 'binary-gh-'));
+  const previous = process.env.PATH;
+  process.env.PATH = bin + ':' + previous;
+  t.after(() => {
+    process.env.PATH = previous;
+    rmSync(bin, { recursive: true, force: true });
+  });
+  const details = { title: 'Fix sync', state: 'closed', updated_at: '2026-11-26T00:00:00Z', draft: false,
+    pull_request: { merged_at: '2026-11-26T00:00:00Z' } };
+  writeFileSync(join(bin, 'gh'), `#!/bin/sh
+[ "$1 $2 $3 $4 $5 $6 $7" = "api --hostname github.com --method GET repos/org/private/issues/42 --jq" ] || exit 1
+echo '${JSON.stringify(details)}'
+`, { mode: 0o755 });
+  assert.deepEqual(await call('GET', path), { status: 200, json: details });
+  assert.equal((await call('GET', path.replace('42', '43'))).status, 502);
+});
+
 test('create, list, update and errors', async () => {
   const created = await call('POST', '/api/v1/sessions', { cwd: h.cwd, title: 't1', effort: 'high' });
   assert.equal(created.status, 201);

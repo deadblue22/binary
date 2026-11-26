@@ -110,6 +110,8 @@ client/scripts/build-ios.sh --device    # build, install and launch on the conne
 
 To install on a device, sign in to Xcode with an Apple ID first (Xcode → Settings → Accounts; a free Personal Team works, but what it signs runs for 7 days, then install again), turn on Developer Mode on the phone (Settings → Privacy & Security), and the first time, trust the developer under Settings → General → VPN & Device Management. The script uses the first team Xcode knows and the first paired device; `BINARY_TEAM=<team id>`, `BINARY_IOS_BUNDLE_ID=<bundle id>` (default `dev.binary.ios.<team id>`) and a UDID after `--device` override them.
 
+The session info sheet reads GitHub issue and pull request titles and status through the binaryd server that owns the session. For private repositories, install GitHub CLI (`gh`) on that server and sign in to github.com as the account running binaryd. The phone uses its existing Binary connection. Older servers still support public repository details through GitHub directly.
+
 **Connecting.** binaryd listens only on `127.0.0.1` by default, which the phone can't reach, so give each server an address it can. Tailscale is the simplest (install it on the phone too); on the Mac or server:
 
 ```bash

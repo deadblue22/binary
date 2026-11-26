@@ -91,7 +91,8 @@ struct PhoneSessionView: View {
         }
         .sheet(isPresented: $nav.showingInfo) {
             SessionInfoSheet(conn: controller.conn, sessionID: controller.id, connected: controller.connected,
-                             referenceCard: GitHubReferenceCard(controller: controller, references: controller.references))
+                             referenceCard: GitHubReferenceCard(server: controller.conn.githubIssueAPI, controller: controller,
+                                                               references: controller.references))
         }
         .alert(tr("Rename Session"), isPresented: $renaming) {
             TextField(tr("Title"), text: $newTitle)

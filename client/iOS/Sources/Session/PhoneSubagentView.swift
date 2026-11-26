@@ -58,7 +58,7 @@ struct PhoneSubagentView: View {
         }
         .sheet(isPresented: $info) {
             SessionInfoSheet(conn: controller.conn, sessionID: controller.sessionID, currentAgent: controller.agentID,
-                             referenceCard: GitHubReferenceCard(references: controller.references))
+                             referenceCard: GitHubReferenceCard(server: controller.conn.githubIssueAPI, references: controller.references))
         }
         .onChange(of: nav.selection) { _, _ in info = false }
     }

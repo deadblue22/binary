@@ -2,6 +2,8 @@
 // updates. Wire-compatible with the original Go server. Human-readable text
 // in responses and events follows the client's Accept-Language (zh or en).
 
+import { execFile } from 'node:child_process';
+import { promisify } from 'node:util';
 import { timingSafeEqual } from 'node:crypto';
 import { mkdirSync, readdirSync, readFileSync, statSync, existsSync } from 'node:fs';
 import type { IncomingMessage, ServerResponse } from 'node:http';
@@ -48,6 +50,7 @@ class ApiFailure extends Error {
 
 const NODE_ARCH: Record<string, string> = { x64: 'amd64', ia32: '386' };
 
+const exec = promisify(execFile);
 const MAX_FILE = 50 << 20;
 
 const MIME: Record<string, string> = {
@@ -122,6 +125,7 @@ export function createHandler(o: ApiOptions): (req: IncomingMessage, res: Server
   route('GET', '/api/v1/info', () =>
     ok({
       name: o.name,
+      githubIssueDetails: true,
       hostname: hostname(),
       os: process.platform,
       arch: NODE_ARCH[process.arch] ?? process.arch,
@@ -136,6 +140,23 @@ export function createHandler(o: ApiOptions): (req: IncomingMessage, res: Server
       ...(m.cachedUsage() && { usage: m.cachedUsage() }),
     }),
   );
+
+  route('GET', '/api/v1/github/issue', async ({ url }) => {
+    const repository = url.searchParams.get('repository') ?? '';
+    const number = url.searchParams.get('number') ?? '';
+    if (!/^[a-z0-9][a-z0-9-]{0,38}\/(?!\.{1,2}$)[a-z0-9_.-]{1,100}$/i.test(repository) || !/^[1-9][0-9]{0,9}$/.test(number)) {
+      throw new HttpError(400, T('githubIssueInvalid'));
+    }
+    // gh owns the server account's credential. Return only the fields used in the inspector.
+    const fields = '{title, state, updated_at, draft, pull_request: (.pull_request | if . then {merged_at} else null end)}';
+    try {
+      const { stdout } = await exec('gh', ['api', '--hostname', 'github.com', '--method', 'GET',
+        `repos/${repository}/issues/${number}`, '--jq', fields], { timeout: 15_000, maxBuffer: 64 * 1024 });
+      return ok(JSON.parse(stdout));
+    } catch {
+      throw new HttpError(502, T('githubIssueUnavailable'));
+    }
+  });
 
   route('GET', '/api/v1/sessions', () => ok({ sessions: m.summaries() }));
 

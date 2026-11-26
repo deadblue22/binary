@@ -3,6 +3,7 @@ import Foundation
 // Types mirroring binaryd's JSON API (see docs/DESIGN.md).
 
 struct ServerInfo: Decodable, Sendable {
+    var githubIssueDetails: Bool?
     var name: String
     var hostname: String
     var os: String

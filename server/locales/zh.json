@@ -37,6 +37,8 @@
  "defaultModel": "Claude Code 默认模型",
  "bodyTooLarge": "请求体过大",
  "badRequest": "请求格式错误: {detail}",
+ "githubIssueInvalid": "GitHub 仓库名或编号无效",
+ "githubIssueUnavailable": "服务端的 GitHub CLI 无法读取该 Issue 或 PR",
  "tokenInvalid": "token 无效",
  "notFound": "未找到",
  "methodNotAllowed": "不支持该方法",
