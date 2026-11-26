@@ -482,8 +482,10 @@ struct GitHubReferenceCard: View {
     var body: some View {
         let rows = rows
         let hasEarlier = controller?.needsReferenceHistory == true
+        let kinds = Set(rows.map { cache.lookups[$0.id]?.details?.kind ?? $0.kind })
+        let heading = kinds == ["PR"] ? tr("Pull Requests") : kinds == ["Issue"] ? tr("Issues") : tr("Issues and PRs")
         if !rows.isEmpty || hasEarlier {
-            InspectorCard(title: tr("Issues and PRs"), trailing: String(rows.count)) {
+            InspectorCard(title: heading, inlineCount: rows.count) {
                 if !rows.isEmpty {
                     GitHubReferenceList(rows: rows, cache: cache)
                         .id(ObjectIdentifier(cache))
@@ -512,22 +514,17 @@ private struct GitHubReferenceList: View {
     @State private var expanded = false
 
     var body: some View {
-        let singleRepo = Set(rows.map { $0.repository.lowercased() }).count == 1
         let visible = GitHubReference.visible(rows, expanded: expanded) { cache.lookups[$0.id]?.details }
-        VStack(alignment: .leading, spacing: 8) {
-            if singleRepo, let first = rows.first {
-                Text(first.repository).font(theme.font(.caption)).foregroundStyle(theme.c.textMuted)
-            }
+        VStack(alignment: .leading, spacing: 2) {
             ForEach(visible) { row in
-                referenceLink(row, showRepo: !singleRepo)
-                if row.id != visible.last?.id { Divider() }
+                GitHubReferenceRow(row: row, lookup: cache.lookups[row.id])
             }
             if rows.count > GitHubReference.previewCount {
                 Button {
                     expanded.toggle()
                 } label: {
-                    Label(expanded ? tr("Show fewer") : tr("Show \(rows.count - GitHubReference.previewCount) more"),
-                          systemImage: expanded ? "chevron.up" : "chevron.down")
+                    Text(expanded ? tr("Show fewer") : tr("See all"))
+                        .padding(.vertical, 4)
                 }
                 .buttonStyle(.plain)
                 .font(theme.font(.caption))
@@ -541,57 +538,12 @@ private struct GitHubReferenceList: View {
             }
         }
     }
-
-    private func referenceLink(_ row: GitHubReference, showRepo: Bool) -> some View {
-        let lookup = cache.lookups[row.id]
-        let details = lookup?.details
-        let label = [details?.kind ?? row.kind, "#" + row.number].compactMap { $0 }.joined(separator: " ")
-        return Link(destination: row.url) {
-            VStack(alignment: .leading, spacing: 3) {
-                Text(details?.title ?? label)
-                    .font(theme.font(.callout).weight(.medium))
-                    .foregroundStyle(theme.c.text)
-                    .lineLimit(3)
-                    .fixedSize(horizontal: false, vertical: true)
-                if showRepo {
-                    Text(row.repository).foregroundStyle(theme.c.textMuted)
-                }
-                HStack(spacing: 6) {
-                    if let details {
-                        Text(label).foregroundStyle(theme.c.link)
-                        statusLabel(details.status)
-                        Spacer(minLength: 0)
-                        Text(Format.relative(details.updatedAt)).foregroundStyle(theme.c.textMuted)
-                    } else {
-                        Text(lookup == nil ? tr("Loading…") : tr("Details unavailable"))
-                            .foregroundStyle(theme.c.textMuted)
-                    }
-                }
-            }
-            .font(theme.font(.caption))
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .contentShape(Rectangle())
-        }
-        .buttonStyle(.plain)
-        .help([details?.title, row.url.absoluteString].compactMap { $0 }.joined(separator: "\n"))
-    }
-
-    private func statusLabel(_ status: GitHubIssueDetails.Status) -> some View {
-        let label: String
-        let color: Color
-        switch status {
-        case .open: (label, color) = (tr("Still open"), theme.c.success)
-        case .draft: (label, color) = (tr("Draft"), theme.c.textMuted)
-        case .merged: (label, color) = (tr("Merged"), theme.c.external)
-        case .closed: (label, color) = (tr("Closed"), theme.c.textMuted)
-        }
-        return Text(label).foregroundStyle(color)
-    }
 }
 
 struct InspectorCard<Content: View>: View {
     let title: String
     var trailing: String? = nil
+    var inlineCount: Int? = nil
     var initiallyOpen = true
     @ViewBuilder let content: () -> Content
     @Environment(\.theme) private var theme
@@ -607,6 +559,13 @@ struct InspectorCard<Content: View>: View {
                     Text(title)
                         .font(theme.font(.callout).weight(.semibold))
                         .foregroundStyle(theme.c.heading)
+                    if let inlineCount {
+                        Text(String(inlineCount))
+                            .font(theme.font(.caption).monospacedDigit())
+                            .foregroundStyle(theme.c.textMuted)
+                            .padding(.horizontal, 5)
+                            .background(theme.c.surfaceAlt, in: Capsule())
+                    }
                     Image(systemName: "chevron.down")
                         .font(.system(size: 9, weight: .semibold))
                         .foregroundStyle(theme.c.textFaint)

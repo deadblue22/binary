@@ -39,6 +39,19 @@ final class GitHubReferencesTests: XCTestCase {
         XCTAssertEqual(references.values.last?.url.absoluteString, "https://github.com/one2x-ai/merouter/pull/767")
     }
 
+    func testPullPreviewDecodesGitHubBranchesAuthorAndDescription() throws {
+        let payload = #"{"title":"Update adapters","state":"closed","merged_at":"2026-11-26T05:00:00Z","updated_at":"2026-11-26T05:01:00Z","head":{"ref":"update"},"base":{"ref":"main"},"user":{"login":"octocat"},"body":"Release notes"}"#
+        let decoder = JSONDecoder()
+        decoder.dateDecodingStrategy = .iso8601
+        let detail = try decoder.decode(GitHubIssueDetails.self, from: Data(payload.utf8))
+        XCTAssertEqual(detail.kind, "PR")
+        XCTAssertEqual(detail.status, .merged)
+        XCTAssertEqual(detail.head?.ref, "update")
+        XCTAssertEqual(detail.base?.ref, "main")
+        XCTAssertEqual(detail.user?.login, "octocat")
+        XCTAssertEqual(detail.body, "Release notes")
+    }
+
     func testRecentPreviewAndExpandedListUseGitHubStateAndUpdateTime() throws {
         func detail(_ day: Int, _ state: String, pr: Bool = false, merged: Bool = false,
                     draft: Bool = false) throws -> GitHubIssueDetails {

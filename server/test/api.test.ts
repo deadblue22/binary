@@ -73,10 +73,16 @@ test('GitHub issue metadata uses the authenticated server account and validates 
   const details = { title: 'Fix sync', state: 'closed', updated_at: '2026-11-26T00:00:00Z', draft: false,
     pull_request: { merged_at: '2026-11-26T00:00:00Z' } };
   writeFileSync(join(bin, 'gh'), `#!/bin/sh
-[ "$1 $2 $3 $4 $5 $6 $7" = "api --hostname github.com --method GET repos/org/private/issues/42 --jq" ] || exit 1
+[ "$1 $2 $3 $4 $5 $7" = "api --hostname github.com --method GET --jq" ] || exit 1
+case "$6" in
+  repos/org/private/issues/42) ;;
+  repos/org/private/pulls/42) echo '{"head":{"ref":"feature"},"base":{"ref":"main"}}'; exit 0 ;;
+  *) exit 1 ;;
+esac
 echo '${JSON.stringify(details)}'
 `, { mode: 0o755 });
   assert.deepEqual(await call('GET', path), { status: 200, json: details });
+  assert.deepEqual((await call('GET', path + '&kind=PR')).json, { head: { ref: 'feature' }, base: { ref: 'main' } });
   assert.equal((await call('GET', path.replace('42', '43'))).status, 502);
 });
 

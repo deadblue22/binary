@@ -148,10 +148,13 @@ export function createHandler(o: ApiOptions): (req: IncomingMessage, res: Server
       throw new HttpError(400, T('githubIssueInvalid'));
     }
     // gh owns the server account's credential. Return only the fields used in the inspector.
-    const fields = '{title, state, updated_at, draft, pull_request: (.pull_request | if . then {merged_at} else null end)}';
+    const pull = url.searchParams.get('kind') === 'PR';
+    const fields = '{title, state, updated_at, draft, user: (.user | if . then {login} else null end), body: (.body // "" | .[:512])} + ' +
+      (pull ? '{head: (.head | {ref}), base: (.base | {ref}), pull_request: {merged_at}}'
+            : '{pull_request: (.pull_request | if . then {merged_at} else null end)}');
     try {
       const { stdout } = await exec('gh', ['api', '--hostname', 'github.com', '--method', 'GET',
-        `repos/${repository}/issues/${number}`, '--jq', fields], { timeout: 15_000, maxBuffer: 64 * 1024 });
+        `repos/${repository}/${pull ? 'pulls' : 'issues'}/${number}`, '--jq', fields], { timeout: 15_000, maxBuffer: 64 * 1024 });
       return ok(JSON.parse(stdout));
     } catch {
       throw new HttpError(502, T('githubIssueUnavailable'));

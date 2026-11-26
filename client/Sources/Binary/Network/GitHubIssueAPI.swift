@@ -8,21 +8,30 @@ struct GitHubIssueDetails: Decodable, Sendable {
         enum CodingKeys: String, CodingKey { case mergedAt = "merged_at" }
     }
 
+    struct Author: Decodable, Sendable { let login: String }
+    struct Branch: Decodable, Sendable { let ref: String }
+
     enum CodingKeys: String, CodingKey {
-        case title, state, draft
+        case title, state, draft, user, body, head, base
+        case mergedAt = "merged_at"
         case updatedAt = "updated_at"
         case pullRequest = "pull_request"
     }
 
+    let user: Author?
+    let head: Branch?
+    let base: Branch?
+    let body: String?
+    private let mergedAt: String?
     let title: String
     let updatedAt: Date
     private let state: State
     private let draft: Bool?
     private let pullRequest: PullRequest?
 
-    var kind: String { pullRequest == nil ? "Issue" : "PR" }
+    var kind: String { pullRequest != nil || head != nil ? "PR" : "Issue" }
     var status: Status {
-        if pullRequest?.mergedAt != nil { return .merged }
+        if mergedAt != nil || pullRequest?.mergedAt != nil { return .merged }
         if state == .closed { return .closed }
         if draft == true { return .draft }
         return .open
@@ -63,25 +72,34 @@ struct GitHubIssueAPI {
     }
 
     private static func details(for ref: GitHubReference, server: APIClient?, token: String?) async -> GitHubIssueDetails? {
-        if let server, let details: GitHubIssueDetails = try? await server.get("/github/issue", query: [
-            "repository": ref.repository, "number": ref.number
-        ]) { return details }
-        guard !Task.isCancelled else { return nil }
-        // Public repositories are still readable when the server has no gh login.
-        let url = URL(string: "https://api.github.com/repos")!
-            .appendingPathComponent(ref.repository)
-            .appendingPathComponent("issues")
-            .appendingPathComponent(ref.number)
-        var request = URLRequest(url: url)
-        request.setValue("application/vnd.github+json", forHTTPHeaderField: "Accept")
-        if let token { request.setValue("Bearer " + token, forHTTPHeaderField: "Authorization") }
-        do {
-            let (data, response) = try await session.data(for: request)
-            guard (response as? HTTPURLResponse)?.statusCode == 200 else { return nil }
-            let decoder = JSONDecoder()
-            decoder.dateDecodingStrategy = .iso8601
-            return try decoder.decode(GitHubIssueDetails.self, from: data)
-        } catch { return nil }
+        func read(pull: Bool) async -> GitHubIssueDetails? {
+            guard !Task.isCancelled else { return nil }
+            if let server, let details: GitHubIssueDetails = try? await server.get("/github/issue", query: [
+                "repository": ref.repository, "number": ref.number, "kind": pull ? "PR" : "Issue"
+            ]) { return details }
+            guard !Task.isCancelled else { return nil }
+            let url = URL(string: "https://api.github.com/repos")!
+                .appendingPathComponent(ref.repository)
+                .appendingPathComponent(pull ? "pulls" : "issues")
+                .appendingPathComponent(ref.number)
+            var request = URLRequest(url: url)
+            request.setValue("application/vnd.github+json", forHTTPHeaderField: "Accept")
+            if let token { request.setValue("Bearer " + token, forHTTPHeaderField: "Authorization") }
+            do {
+                let (data, response) = try await session.data(for: request)
+                guard (response as? HTTPURLResponse)?.statusCode == 200 else { return nil }
+                let decoder = JSONDecoder()
+                decoder.dateDecodingStrategy = .iso8601
+                return try decoder.decode(GitHubIssueDetails.self, from: data)
+            } catch { return nil }
+        }
+        if ref.kind == "PR", let pull = await read(pull: true) { return pull }
+        let issue = await read(pull: false)
+        // An untyped owner/repo#number can turn out to be a pull request.
+        if ref.kind != "PR", issue?.kind == "PR", issue?.user != nil {
+            return await read(pull: true) ?? issue
+        }
+        return issue
     }
 
     static func load(_ refs: [GitHubReference], server: APIClient?,
