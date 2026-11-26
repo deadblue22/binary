@@ -472,30 +472,58 @@ struct GitHubReferenceCard: View {
     @Environment(\.theme) private var theme
     @State private var attempt = 0
 
-    var body: some View {
+    private var rows: [GitHubReference] {
         var all = references
         if let older = controller?.earlierReferences { all.merge(older) }
-        let rows = all.values
-        return InspectorCard(title: tr("Issues and PRs"), trailing: String(rows.count)) {
-            ForEach(rows) { row in
-                if let url = row.url {
-                    Link(row.label, destination: url).foregroundStyle(theme.c.link)
-                } else {
-                    Text(row.label).foregroundStyle(theme.c.text).textSelection(.enabled)
+        return all.values
+    }
+
+    var body: some View {
+        let rows = rows
+        let groups = Dictionary(grouping: rows) { $0.repository.lowercased() }
+        let hasEarlier = controller?.hasMore == true && controller?.earlierReferences == nil
+        if !rows.isEmpty || hasEarlier {
+            InspectorCard(title: tr("Issues and PRs"), trailing: String(rows.count)) {
+                ForEach(groups.keys.sorted(), id: \.self) { key in
+                    if let links = groups[key], let first = links.first {
+                        VStack(alignment: .leading, spacing: 5) {
+                            Text(first.repository)
+                                .font(theme.font(.caption).weight(.medium))
+                                .foregroundStyle(theme.c.textMuted)
+                            LazyVGrid(columns: [GridItem(.adaptive(minimum: theme.size(.callout) * 8), spacing: 6)],
+                                      alignment: .leading, spacing: 6) {
+                                ForEach(links) { row in
+                                    Link(destination: row.url) {
+                                        HStack(spacing: 4) {
+                                            if let kind = row.kind {
+                                                Text(kind).foregroundStyle(theme.c.textMuted)
+                                            }
+                                            Text("#" + row.number).monospacedDigit().foregroundStyle(theme.c.link)
+                                        }
+                                        .padding(.horizontal, 8)
+                                        .padding(.vertical, 4)
+                                        .frame(maxWidth: .infinity, alignment: .leading)
+                                        .background(theme.c.surfaceAlt, in: RoundedRectangle(cornerRadius: 5))
+                                    }
+                                    .buttonStyle(.plain)
+                                    .help(row.url.absoluteString)
+                                    .accessibilityLabel(Text(row.repository + " " + row.label))
+                                }
+                            }
+                        }
+                    }
+                }
+                if controller?.referenceHistoryFailed == true {
+                    Button(tr("Retry loading earlier references")) { attempt += 1 }
+                } else if hasEarlier {
+                    Text(controller?.connected == true ? tr("Checking earlier messages…") : tr("Loaded messages only"))
+                        .foregroundStyle(theme.c.textMuted)
                 }
             }
-            if controller?.referenceHistoryFailed == true {
-                Button(tr("Retry loading earlier references")) { attempt += 1 }
-            } else if controller?.hasMore == true && controller?.earlierReferences == nil {
-                Text(controller?.connected == true ? tr("Checking earlier messages…") : tr("Loaded messages only"))
-                    .foregroundStyle(theme.c.textMuted)
-            } else if rows.isEmpty {
-                Text(tr("No references found")).foregroundStyle(theme.c.textMuted)
+            .font(theme.font(.callout))
+            .task(id: "\(controller?.referenceHistoryKey ?? "")|\(attempt)") {
+                await controller?.loadEarlierReferences()
             }
-        }
-        .font(theme.font(.callout))
-        .task(id: "\(controller?.referenceHistoryKey ?? "")|\(attempt)") {
-            await controller?.loadEarlierReferences()
         }
     }
 }

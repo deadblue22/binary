@@ -18,10 +18,25 @@ final class GitHubReferencesTests: XCTestCase {
         earlier.append([tool])
         references.merge(earlier)
 
-        XCTAssertEqual(references.values.map(\.id), ["org/app#7", "other/app#7", "#8", "#9", "#10"])
-        XCTAssertEqual(references.values.map(\.kind), ["PR", "Issue", "Issue", "PR", "PR"])
-        XCTAssertEqual(references.values.first?.url?.absoluteString, "https://github.com/Org/App/pull/7")
-        XCTAssertNil(references.values.last?.url)
+        XCTAssertEqual(references.values.map(\.id), ["org/app#7", "other/app#7"])
+        XCTAssertEqual(references.values.map(\.kind), ["PR", "Issue"])
+        XCTAssertEqual(references.values.first?.url.absoluteString, "https://github.com/Org/App/pull/7")
+        XCTAssertEqual(references.values.last?.url.absoluteString.lowercased(), "https://github.com/other/app/issues/7")
+    }
+
+    func testOnlyLinkableReferencesCountAcrossMessages() {
+        let entries = [
+            "https://github.com/one2x-ai/merouter/issues/764",
+            "https://github.com/one2x-ai/merouter/pull/766",
+            "Issue #764", "PR #765",
+            "PR one2x-ai/merouter#767", "#766", "PR #767",
+        ].enumerated().map { index, text in
+            Entry(seq: Int64(index), uuid: String(index), kind: "assistant", blocks: [Block(type: "text", text: text)])
+        }
+        var references = GitHubReferences()
+        references.append(entries)
+        XCTAssertEqual(references.values.map(\.label), ["Issue #764", "PR #766", "PR #767"])
+        XCTAssertEqual(references.values.last?.url.absoluteString, "https://github.com/one2x-ai/merouter/pull/767")
     }
 
     func testEarlierPagesFollowUUIDsAndDiscardChangedGeneration() async throws {
@@ -30,7 +45,7 @@ final class GitHubReferencesTests: XCTestCase {
             cursors.append(cursor)
             let id = cursor == "end" ? "middle" : "start"
             let entry = Entry(seq: 1, uuid: id, kind: "assistant", blocks: [
-                Block(type: "text", text: id == "middle" ? "PR #2" : "Issue #1 and PR #2"),
+                Block(type: "text", text: id == "middle" ? "PR repo/app#2" : "Issue repo/app#1 and PR repo/app#2"),
             ])
             return EntriesPage(entries: [entry], hasMore: id == "middle", gen: "g")
         }

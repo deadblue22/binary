@@ -2,14 +2,17 @@ import Foundation
 
 /// GitHub shares one number sequence between issues and pull requests in a repository.
 struct GitHubReference: Identifiable, Equatable {
-    let repository: String?
+    let repository: String
     let number: String
     let kind: String?
 
-    var id: String { (repository?.lowercased() ?? "") + "#" + number }
-    var label: String { [kind, (repository ?? "") + "#" + number].compactMap { $0 }.joined(separator: " ") }
-    var url: URL? {
-        repository.flatMap { URL(string: "https://github.com/\($0)/\(kind == "PR" ? "pull" : "issues")/\(number)") }
+    var id: String { repository.lowercased() + "#" + number }
+    var label: String { [kind, "#" + number].compactMap { $0 }.joined(separator: " ") }
+    var url: URL {
+        URL(string: "https://github.com")!
+            .appendingPathComponent(repository)
+            .appendingPathComponent(kind == "PR" ? "pull" : "issues")
+            .appendingPathComponent(number)
     }
 }
 
@@ -51,11 +54,9 @@ struct GitHubReferences {
     // Consume a Markdown link's label along with its destination so [PR #12](…/pull/12)
     // contributes only the qualified reference. Stop before fragments and subpages.
     private static let link = #"(?:(?:\[[^\[\]\n]*\]\()?(?<![a-z0-9./@_-])(?:https?://)?github\.com/([a-z0-9-]+/[a-z0-9_.-]+)/(issues|pull)/([1-9][0-9]*)(?![a-z0-9_]))"#
-    private static let short = #"(?<![a-z0-9_./#-])(?:(pull[ \t]+request|pr|issue)[ \t]*)?(?:([a-z0-9-]+/[a-z0-9_.-]+))?#([1-9][0-9]*)(?![a-z0-9_])"#
+    private static let short = #"(?<![a-z0-9_./#-])(?:(pull[ \t]+request|pr|issue)[ \t]*)?([a-z0-9-]+/[a-z0-9_.-]+)#([1-9][0-9]*)(?![a-z0-9_])"#
     private static let links = try! NSRegularExpression(pattern: link, options: .caseInsensitive)
-    private static let typedNumber = #"(?<![a-z0-9_])(pull[ \t]+request|pr|issue)[ \t]+([1-9][0-9]*)(?![a-z0-9_])"#
-    private static let mentions = try! NSRegularExpression(pattern: [link, short, typedNumber].joined(separator: "|"),
-                                                           options: .caseInsensitive)
+    private static let mentions = try! NSRegularExpression(pattern: link + "|" + short, options: .caseInsensitive)
 
     private mutating func scan(_ text: String, linksOnly: Bool) {
         if linksOnly && !text.localizedCaseInsensitiveContains("github.com/") { return }
@@ -68,9 +69,9 @@ struct GitHubReferences {
             }
             if let repo = group(1), let number = group(3) {
                 add(GitHubReference(repository: repo, number: number, kind: group(2)?.lowercased() == "pull" ? "PR" : "Issue"))
-            } else if let number = group(6) ?? group(8) {
-                let kind = (group(4) ?? group(7)).map { $0.lowercased() == "issue" ? "Issue" : "PR" }
-                add(GitHubReference(repository: group(5), number: number, kind: kind))
+            } else if let repo = group(5), let number = group(6) {
+                let kind = group(4).map { $0.lowercased() == "issue" ? "Issue" : "PR" }
+                add(GitHubReference(repository: repo, number: number, kind: kind))
             }
         }
     }
