@@ -466,7 +466,7 @@ private struct InspectorHost<I: View>: ViewModifier {
 
 /// Older pages are scanned separately so opening the inspector doesn't expand the transcript.
 struct GitHubReferenceCard: View {
-    var server: APIClient? = nil
+    var cache: GitHubIssueCache = .direct
     var controller: SessionController?
     let references: GitHubReferences
 
@@ -485,8 +485,8 @@ struct GitHubReferenceCard: View {
         if !rows.isEmpty || hasEarlier {
             InspectorCard(title: tr("Issues and PRs"), trailing: String(rows.count)) {
                 if !rows.isEmpty {
-                    GitHubReferenceList(rows: rows, server: server)
-                        .id(server.map(ObjectIdentifier.init))
+                    GitHubReferenceList(rows: rows, cache: cache)
+                        .id(ObjectIdentifier(cache))
                         .id(controller?.ref)
                 }
                 if controller?.referenceHistoryFailed == true {
@@ -506,19 +506,14 @@ struct GitHubReferenceCard: View {
 
 private struct GitHubReferenceList: View {
     let rows: [GitHubReference]
-    let server: APIClient?
-    private struct Lookup {
-        let details: GitHubIssueDetails?
-        let checked = Date()
-    }
+    let cache: GitHubIssueCache
 
     @Environment(\.theme) private var theme
-    @State private var lookups: [String: Lookup] = [:]
     @State private var expanded = false
 
     var body: some View {
         let singleRepo = Set(rows.map { $0.repository.lowercased() }).count == 1
-        let visible = GitHubReference.visible(rows, expanded: expanded) { lookups[$0.id]?.details }
+        let visible = GitHubReference.visible(rows, expanded: expanded) { cache.lookups[$0.id]?.details }
         VStack(alignment: .leading, spacing: 8) {
             if singleRepo, let first = rows.first {
                 Text(first.repository).font(theme.font(.caption)).foregroundStyle(theme.c.textMuted)
@@ -541,18 +536,14 @@ private struct GitHubReferenceList: View {
         }
         .task(id: rows.map(\.id)) {
             while !Task.isCancelled {
-                let cutoff = Date().addingTimeInterval(-300)
-                let pending = rows.filter { (lookups[$0.id]?.checked ?? .distantPast) <= cutoff }
-                await GitHubIssueAPI.load(pending, server: server) { id, details in
-                    if !Task.isCancelled { lookups[id] = Lookup(details: details) }
-                }
-                do { try await Task.sleep(for: .seconds(300)) } catch { return }
+                await cache.refresh(rows)
+                do { try await Task.sleep(for: .seconds(cache.refreshDelay(for: rows))) } catch { return }
             }
         }
     }
 
     private func referenceLink(_ row: GitHubReference, showRepo: Bool) -> some View {
-        let lookup = lookups[row.id]
+        let lookup = cache.lookups[row.id]
         let details = lookup?.details
         let label = [details?.kind ?? row.kind, "#" + row.number].compactMap { $0 }.joined(separator: " ")
         return Link(destination: row.url) {

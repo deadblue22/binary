@@ -65,6 +65,57 @@ final class GitHubReferencesTests: XCTestCase {
         XCTAssertEqual(expanded.map(\.number), ["5", "1", "2", "3", "6", "4", "7"])
     }
 
+    @MainActor
+    func testSwitchingConversationsFetchesOnlyMissingOrExpiredIssues() async throws {
+        var now = Date()
+        let cache = GitHubIssueCache(now: { now })
+        let first = GitHubReference(repository: "Org/App", number: "7", kind: "PR")
+        let same = GitHubReference(repository: "org/app", number: "7", kind: nil)
+        let other = GitHubReference(repository: "org/app", number: "8", kind: "Issue")
+        let json = #"{"title":"Fix sync","state":"open","updated_at":"2026-11-01T00:00:00Z"}"#
+        let decoder = JSONDecoder()
+        decoder.dateDecodingStrategy = .iso8601
+        let details = try decoder.decode(GitHubIssueDetails.self, from: Data(json.utf8))
+        var requests: [[String]] = []
+        let load: GitHubIssueCache.Loader = { refs, _, receive in
+            requests.append(refs.map(\.id))
+            for ref in refs { receive(ref.id, ref.id == first.id ? details : nil) }
+        }
+        await cache.refresh([first], load: load)
+        now.addTimeInterval(240)
+        await cache.refresh([same, other], load: load)
+        await cache.refresh([first], load: load)
+        XCTAssertEqual(requests, [[first.id], [other.id]])
+        XCTAssertEqual(cache.lookups[same.id]?.details?.title, "Fix sync")
+        XCTAssertEqual(cache.refreshDelay(for: [same, other]), 60)
+        now.addTimeInterval(60)
+        await cache.refresh([other, same], load: load)
+        XCTAssertEqual(requests, [[first.id], [other.id], [first.id]])
+        XCTAssertNil(GitHubIssueCache().lookups[first.id])
+    }
+
+    @MainActor
+    func testLeavingInspectorDoesNotCancelOrDuplicateAnInFlightLookup() async {
+        let cache = GitHubIssueCache()
+        let ref = GitHubReference(repository: "org/app", number: "7", kind: "PR")
+        var finish: CheckedContinuation<Void, Never>?
+        var inspector: Task<Void, Never>?
+        await withCheckedContinuation { started in
+            inspector = Task {
+                await cache.refresh([ref]) { _, _, receive in
+                    await withCheckedContinuation { finish = $0; started.resume() }
+                    XCTAssertFalse(Task.isCancelled)
+                    receive(ref.id, nil)
+                }
+            }
+        }
+        inspector?.cancel()
+        await cache.refresh([ref]) { _, _, _ in XCTFail("Started a second request") }
+        finish?.resume()
+        await inspector?.value
+        XCTAssertNotNil(cache.lookups[ref.id])
+    }
+
     func testEarlierPagesFollowUUIDsAndDiscardChangedGeneration() async throws {
         var cursors: [String] = []
         let history = try await GitHubReferences.earlier(than: "end", generation: "g") { cursor in
