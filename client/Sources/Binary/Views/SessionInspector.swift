@@ -37,6 +37,7 @@ struct SubagentInspector: View {
                         .help(tr("Back to Parent Session"))
                     }
                 }
+                GitHubReferenceCard(references: controller.references)
                 InspectorCard(title: tr("Usage")) {
                     InfoRow(icon: "text.bubble", label: tr("Messages"),
                             value: controller.loaded ? "\(entries.count)" : info?.entries.map(String.init) ?? "—")
@@ -79,6 +80,7 @@ struct SessionInspector: View {
     var connected = true
     /// The subagent being viewed, when the detail shows one.
     var currentAgent: String? = nil
+    let referenceCard: GitHubReferenceCard
     var onRename: (() -> Void)? = nil
 
     @Environment(SessionOrganizer.self) private var org
@@ -99,6 +101,7 @@ struct SessionInspector: View {
             VStack(alignment: .leading, spacing: 12) {
                 if let s {
                     sessionCard(s)
+                    referenceCard
                     if s.live { processCard(s) } else if s.hold != nil && !(s.tasks ?? []).isEmpty { heldTasksCard(s) }
                     organizeCard(s)
                     usageCard(s)
@@ -460,6 +463,42 @@ private struct InspectorHost<I: View>: ViewModifier {
     }
 }
 #endif
+
+/// Older pages are scanned separately so opening the inspector doesn't expand the transcript.
+struct GitHubReferenceCard: View {
+    var controller: SessionController?
+    let references: GitHubReferences
+
+    @Environment(\.theme) private var theme
+    @State private var attempt = 0
+
+    var body: some View {
+        var all = references
+        if let older = controller?.earlierReferences { all.merge(older) }
+        let rows = all.values
+        return InspectorCard(title: tr("Issues and PRs"), trailing: String(rows.count)) {
+            ForEach(rows) { row in
+                if let url = row.url {
+                    Link(row.label, destination: url).foregroundStyle(theme.c.link)
+                } else {
+                    Text(row.label).foregroundStyle(theme.c.text).textSelection(.enabled)
+                }
+            }
+            if controller?.referenceHistoryFailed == true {
+                Button(tr("Retry loading earlier references")) { attempt += 1 }
+            } else if controller?.hasMore == true && controller?.earlierReferences == nil {
+                Text(controller?.connected == true ? tr("Checking earlier messages…") : tr("Loaded messages only"))
+                    .foregroundStyle(theme.c.textMuted)
+            } else if rows.isEmpty {
+                Text(tr("No references found")).foregroundStyle(theme.c.textMuted)
+            }
+        }
+        .font(theme.font(.callout))
+        .task(id: "\(controller?.referenceHistoryKey ?? "")|\(attempt)") {
+            await controller?.loadEarlierReferences()
+        }
+    }
+}
 
 struct InspectorCard<Content: View>: View {
     let title: String

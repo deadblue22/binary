@@ -141,7 +141,8 @@ private struct OpenSessionInspector: View {
     @Environment(Navigation.self) private var nav
 
     var body: some View {
-        SessionInspector(conn: controller.conn, sessionID: controller.id, connected: controller.connected) {
+        SessionInspector(conn: controller.conn, sessionID: controller.id, connected: controller.connected,
+                         referenceCard: GitHubReferenceCard(controller: controller, references: controller.references)) {
             nav.renameRequest += 1
         }
     }

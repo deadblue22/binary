@@ -1,4 +1,8 @@
 {
+ "No references found": "未找到相关引用",
+ "Checking earlier messages…": "正在检查更早的消息…",
+ "Issues and PRs": "Issue 和 PR",
+ "Retry loading earlier references": "重新加载更早的引用",
  "Include Tools": "包含工具内容",
  "Include Thinking": "包含思考内容",
  "Search Options": "搜索选项",

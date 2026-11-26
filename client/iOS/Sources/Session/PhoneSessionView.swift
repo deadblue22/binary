@@ -90,7 +90,8 @@ struct PhoneSessionView: View {
             }
         }
         .sheet(isPresented: $nav.showingInfo) {
-            SessionInfoSheet(conn: controller.conn, sessionID: controller.id, connected: controller.connected)
+            SessionInfoSheet(conn: controller.conn, sessionID: controller.id, connected: controller.connected,
+                             referenceCard: GitHubReferenceCard(controller: controller, references: controller.references))
         }
         .alert(tr("Rename Session"), isPresented: $renaming) {
             TextField(tr("Title"), text: $newTitle)
@@ -162,6 +163,7 @@ struct SessionInfoSheet: View {
     let sessionID: String
     var connected = true
     var currentAgent: String? = nil
+    let referenceCard: GitHubReferenceCard
     @Environment(\.theme) private var theme
     @Environment(\.dismiss) private var dismiss
     @State private var renaming = false
@@ -170,6 +172,7 @@ struct SessionInfoSheet: View {
     var body: some View {
         NavigationStack {
             SessionInspector(conn: conn, sessionID: sessionID, connected: connected, currentAgent: currentAgent,
+                             referenceCard: referenceCard,
                              onRename: currentAgent == nil ? {
                                  newTitle = conn.sessions[sessionID]?.title ?? ""
                                  renaming = true

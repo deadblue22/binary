@@ -13,6 +13,7 @@ final class SubagentController: TranscriptSource {
 
     private(set) var entries: [Entry] = []
     private(set) var items: [TranscriptItem] = []
+    private(set) var references = GitHubReferences()
     private(set) var loaded = false
     private(set) var refreshing = false
     var notice: String?
@@ -66,6 +67,8 @@ final class SubagentController: TranscriptSource {
             notice = nil
             if fresh.count != entries.count || fresh.last?.uuid != entries.last?.uuid || !loaded {
                 entries = fresh
+                references = GitHubReferences()
+                references.append(fresh)
                 items = TranscriptBuilder.items(from: fresh)
             }
         } catch let e as APIError where e.status == 404 {

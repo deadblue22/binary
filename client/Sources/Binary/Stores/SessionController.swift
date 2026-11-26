@@ -52,6 +52,12 @@ final class SessionController {
     var notice: String?
 
     private var gen: String?
+    private(set) var references = GitHubReferences()
+    private(set) var earlierReferences: GitHubReferences?
+    private(set) var referenceHistoryFailed = false
+    /// Identifies the history preceding the current snapshot, even across server switches.
+    var referenceHistoryKey: String { "\(conn.id)|\(id)|\(gen ?? "")|\(connected)" }
+
     private var lastSeq: Int64 = 0
     /// The saved copy shown before the server answered: its generation, and
     /// whether all its seqs belong to that generation.
@@ -168,6 +174,7 @@ final class SessionController {
             // Snapshots can be large; decode off the main actor.
             let decoded = await Task.detached { try? WireDate.decoder.decode(SnapshotEvent.self, from: data) }.value
             guard let ev = decoded else { return }
+            earlierReferences = nil
             gen = ev.gen
             entries = ev.entries
             lastSeq = ev.entries.last?.seq ?? 0
@@ -198,6 +205,7 @@ final class SessionController {
                 hasMore = true
                 olderBySeq = true
             }
+            earlierReferences = nil
             gen = ev.gen
             lastSeq = ev.entries.last?.seq ?? ev.anchorSeq
             partial = ev.partial
@@ -216,7 +224,7 @@ final class SessionController {
             guard !fresh.isEmpty else { return }
             entries.append(contentsOf: fresh)
             lastSeq = fresh.last!.seq
-            rebuild()
+            rebuild(appending: fresh)
             save()
         case "partial":
             guard let ev = try? dec.decode(PartialEvent.self, from: data) else { return }
@@ -248,7 +256,13 @@ final class SessionController {
         conn.upsert(s)
     }
 
-    private func rebuild() {
+    private func rebuild(appending fresh: [Entry]? = nil) {
+        if let fresh {
+            references.append(fresh)
+        } else {
+            references = GitHubReferences()
+            references.append(entries)
+        }
         items = TranscriptBuilder.items(from: entries)
         settleOutgoing()
     }
@@ -270,6 +284,24 @@ final class SessionController {
     }
 
     // MARK: - Actions
+
+    func loadEarlierReferences() async {
+        referenceHistoryFailed = false
+        guard earlierReferences == nil, hasMore, connected, let gen, let first = entries.first?.uuid,
+              let api = conn.api else { return }
+        do {
+            let path = "/sessions/\(id)/entries"
+            let history = try await GitHubReferences.earlier(than: first, generation: gen) { cursor in
+                try await api.get(path, query: ["beforeUuid": cursor, "limit": "300"])
+            }
+            guard !Task.isCancelled, gen == self.gen else { return }
+            earlierReferences = history
+        } catch is CancellationError {
+            return
+        } catch {
+            if !Task.isCancelled { referenceHistoryFailed = true }
+        }
+    }
 
     func loadOlder() async {
         guard hasMore, !loadingOlder, let first = entries.first, let api = conn.api else { return }
